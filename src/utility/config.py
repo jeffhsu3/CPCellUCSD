@@ -1,6 +1,7 @@
 import json
 import copy
 import argparse
+from pathlib import Path
 
 """
 Global variable initialization
@@ -25,6 +26,8 @@ def init():
         OUTPUT_NET_NAMES = data.keys()
 
 def generate_config(track, tech, height_config, circuit_names, output_dir):
+    config_dir = Path(output_dir) / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
     # FinFET, SH, 4T
     CONFIG_TEMPLATE = {
         "minimum_gate_cut_length" : {
@@ -188,7 +191,7 @@ def generate_config(track, tech, height_config, circuit_names, output_dir):
             config_template["use_relative_gap"]["value"] = True
             config_template["use_relative_gap"]["perc"] = 0.01
         # ^ Writeout
-        with open(f"./{output_dir}/config/{cir}.json", "w") as f:
+        with open(config_dir / f"{cir}.json", "w") as f:
             json.dump(config_template, f, ensure_ascii=False, indent=4)
 
 def read(config_file):
@@ -204,7 +207,7 @@ def read(config_file):
     except json.JSONDecodeError:
         json.JSONDecodeError(f"Error: Invalid JSON format in '{config_file}'.")
 
-if __name__ == "__main__":
+def main(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--cell_names",
@@ -237,5 +240,15 @@ if __name__ == "__main__":
         type=str,
         help="Output directory for the generated files.",
     )
-    args = parser.parse_args()
-    generate_config(track=args.track, tech=args.tech, height_config=args.height_config, circuit_names=args.cell_names, output_dir=args.output_dir)
+    parsed_args = parser.parse_args(args)
+    generate_config(
+        track=parsed_args.track,
+        tech=parsed_args.tech,
+        height_config=parsed_args.height_config,
+        circuit_names=parsed_args.cell_names,
+        output_dir=parsed_args.output_dir,
+    )
+
+
+if __name__ == "__main__":
+    main()

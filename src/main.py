@@ -85,8 +85,7 @@ class SMTCell:
         return f"SMTCell({self.circuit_names}, {self.technology})"
 
 
-# Example usage with the provided netlist text
-if __name__ == "__main__":
+def main(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
@@ -160,40 +159,46 @@ if __name__ == "__main__":
         choices=["True", "False"],
         help="If log constraints into a file"
     )
-    args = parser.parse_args()
-    if args.level == "debug":
+    parsed_args = parser.parse_args(args)
+    if parsed_args.level == "debug":
         logging.getLogger().setLevel(logging.DEBUG)
-    elif args.level == "info":
+    elif parsed_args.level == "info":
         logging.getLogger().setLevel(logging.INFO)
     
     # Function
-    if args.mode == "spnr":
-        stack = LayerStack(args.layer)
+    if parsed_args.mode == "spnr":
+        stack = LayerStack(parsed_args.layer)
         """
         Example usage of the SMTCell class.
         """
-        if args.tech == "FinFET":
+        if parsed_args.tech == "FinFET":
             technology = FinFET_Tech(
-                lib_name=args.lib_name, layer_stack=stack, unit_width=46.0, num_rt_track=args.track, num_fin=2, height_config=args.height_config
+                lib_name=parsed_args.lib_name, layer_stack=stack, unit_width=46.0, num_rt_track=parsed_args.track, num_fin=2, height_config=parsed_args.height_config
             )
         else:
             raise ValueError("Technology not supported.")
             exit(1)
 
         # log file flag
-        if args.flag_log_constraints == "True":
+        if parsed_args.flag_log_constraints == "True":
             _flag_log_constraints_ = True
-        elif args.flag_log_constraints == "False":
+        elif parsed_args.flag_log_constraints == "False":
             _flag_log_constraints_ = False
         else:
-            raise ValueError(f"Unrecognized flag_log_constraints option: {args.flag_log_constraints}")
+            raise ValueError(f"Unrecognized flag_log_constraints option: {parsed_args.flag_log_constraints}")
         
         smtcell = SMTCell(
-            cdl_file=args.netlist,
-            cell_config=args.cell_config,
-            circuit_names=args.cell_names,
+            cdl_file=parsed_args.netlist,
+            cell_config=parsed_args.cell_config,
+            circuit_names=parsed_args.cell_names,
             technology=technology,
             write_pinlayout=True,
-            output_dir=args.output_dir,
+            output_dir=parsed_args.output_dir,
             flag_log_constraints = _flag_log_constraints_
         )
+        return smtcell
+
+
+# Example usage with the provided netlist text
+if __name__ == "__main__":
+    main()

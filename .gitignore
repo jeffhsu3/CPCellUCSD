@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# uv & package build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+.uv/
+.uv-cache/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Linter & type checking caches
+.ruff_cache/
+.mypy_cache/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Generated simulation and solver outputs (preserve tracked output/gds)
+/output/*
+!/output/gds/

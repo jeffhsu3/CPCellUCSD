@@ -1,12 +1,10 @@
 import klayout.db as pya
 import math
-from typing import NamedTuple, List, Tuple
 import os
-import re
 import argparse
 import logging
 from absl import logging as absl_logging
-from src.utility.entity import Model
+from src.gds.result import MetalData, TechData, TransistorData, parse_result
 
 SOLVER_RESCALE = 2.0
 PERCISION_DIGITS = 4
@@ -17,55 +15,6 @@ SCALE = 4  # 1nm = 0.001um
 # Custom log format: [LEVEL] TIMESTAMP - MESSAGE
 # NOTE: level available: DEBUG, INFO, WARNING, ERROR, CRITICAL
 logging.basicConfig(format="[%(levelname)s] %(asctime)s - %(message)s", level=logging.INFO)
-
-
-class TechData(NamedTuple):
-    """a docstring"""
-
-    col: int
-    track: int
-    cp_pitch: float
-    m0_pitch: float
-    m1_pitch: float
-    m2_pitch: float
-    cp_width: float
-    m0_width: float
-    m1_width: float
-    m2_width: float
-    active_gap: float
-    power_rail_thickness: float
-    power_config: str
-    io_pins: list
-
-
-class TransistorData(NamedTuple):
-    """a docstring"""
-
-    name: str
-    x: float
-    y: float
-    flip: bool
-    width: float
-    height: float
-    source_col: float
-    source_net: str
-    drain_col: float
-    drain_net: str
-    gate_col: float
-    gate_net: str
-    model: str
-
-
-class MetalData(NamedTuple):
-    """a docstring"""
-
-    metal_0: int
-    metal_1: int
-    row_0: float
-    row_1: float
-    col_0: float
-    col_1: float
-    net: str
 
 
 # custom module
@@ -215,109 +164,8 @@ class FinFETLayout:
         self.draw()
         self.save(filename=gds_file)
 
-    def _parse_result(self, path: str) -> Tuple[TechData, List[TransistorData], List[TransistorData], List[MetalData]]:
-        tech_params = {}
-        pmos_transistors: List[TransistorData] = []
-        nmos_transistors: List[TransistorData] = []
-        metals: List[MetalData] = []
-
-        section = None
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-
-                # detect section headers
-                if line.startswith("**") and "Technology Parameters" in line:
-                    section = "tech"
-                    continue
-                elif line.startswith("**") and "Placement Result" in line:
-                    section = "place"
-                    # skip header line
-                    header = next(f)
-                    continue
-                elif line.startswith("**") and "Routing Result" in line:
-                    section = "route"
-                    # skip header
-                    header = next(f)
-                    continue
-                elif line.startswith("**") and "Cell Information" in line:
-                    section = "cell"
-                    # skip header
-                    header = next(f)
-
-                if section == "tech":
-                    # each line: KEY   VALUE
-                    parts = line.split()
-                    key = parts[0]
-                    val = " ".join(parts[1:])
-                    tech_params[key] = val
-
-                elif section == "place":
-                    # parse placement rows
-                    # Name X Y Flip Width Height SrcCol SrcNet DrnCol DrnNet GCol GNet Model
-                    parts = line.split()
-                    if len(parts) < 13:
-                        continue
-                    name = parts[0]
-                    x = float(parts[1])
-                    y = float(parts[2])
-                    flip_str = parts[3]
-                    flip = flip_str == "F"
-                    width = float(parts[4])
-                    height = float(parts[5])
-                    src_col = float(parts[6])
-                    src_net = parts[7]
-                    drn_col = float(parts[8])
-                    drn_net = parts[9]
-                    gate_col = float(parts[10])
-                    gate_net = parts[11]
-                    if parts[12].lower() == "pmos":
-                        model = Model.PMOS
-                        pmos_transistors.append(
-                            TransistorData(name, x, y, flip, width, height, src_col, src_net, drn_col, drn_net, gate_col, gate_net, model)
-                        )
-                    elif parts[12].lower() == "nmos":
-                        model = Model.NMOS
-                        nmos_transistors.append(
-                            TransistorData(name, x, y, flip, width, height, src_col, src_net, drn_col, drn_net, gate_col, gate_net, model)
-                        )
-
-                elif section == "route":
-                    # each line: M0 ROW0 COL0 NET => M1 ROW1 COL1 NET
-                    m = re.match(r"(\d+)\s+([\d\.]+)\s+([\d\.]+)\s+(\S+)\s*=>\s*(\d+)\s+([\d\.]+)\s+([\d\.]+)\s+(\S+)", line)
-                    if not m:
-                        continue
-                    m0, r0, c0, net0, m1, r1, c1, net1 = m.groups()
-                    assert net0 == net1, f"Net mismatch in routing data, {net0} != {net1}"
-                    # net0 and net1 should be identical
-                    metals.append(
-                        MetalData(metal_0=int(m0), metal_1=int(m1), row_0=float(r0), row_1=float(r1), col_0=float(c0), col_1=float(c1), net=net0)
-                    )
-                elif section == "cell":
-                    pins = line.split()
-                    tech_params["IO_PINS"] = pins
-
-        # build TechData, converting types
-        td = TechData(
-            col=int(tech_params["COL"]),
-            track=int(tech_params["TRACK"]),
-            cp_pitch=float(tech_params["CPP"]),
-            m0_pitch=float(tech_params["M0P"]),
-            m1_pitch=float(tech_params["M1P"]),
-            m2_pitch=float(tech_params["M2P"]),
-            cp_width=float(tech_params["CP_WIDTH"]),
-            m0_width=float(tech_params["M0_WIDTH"]),
-            m1_width=float(tech_params["M1_WIDTH"]),
-            m2_width=float(tech_params["M2_WIDTH"]),
-            active_gap=float(tech_params["ACTIVE_GAP"]),
-            power_rail_thickness=float(tech_params["PWR_RAIL_THICKNESS"]),
-            power_config=tech_params["PWR_CONFIG"],
-            io_pins=tech_params["IO_PINS"]
-        )
-
-        return td, pmos_transistors, nmos_transistors, metals
+    def _parse_result(self, path):
+        return parse_result(path)
 
     def draw(self):
         """

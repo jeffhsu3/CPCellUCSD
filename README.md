@@ -43,6 +43,76 @@ make smtcell_gds
 
 That's it. Your layouts will appear in `output/<library>/<height>/gds/`.
 
+Both Python entry points (`src.utility.config` and `src.main`) accept absolute
+or relative `--output_dir` paths and create their output directories as needed.
+Wrappers can pass a new output path directly; no pre-created `config/`,
+`result/`, `constraint/`, or `view/` directories are required. For Make, set
+`OUT_DIR=/absolute/path/to/run` to use the same location across stages.
+
+### GT2N GDS export
+
+The GT2N backend consumes the same `.res` format as `gds_FinFET_SH.py` and
+exports native GT2N layers. It supports single-height cells with four signal
+tracks, a 42 nm contacted gate pitch, a 144 nm cell height, W13/W31 nanosheet
+widths, and LVT/ELVT/ULVT/SVT/HVT flavors. The default is W13 LVT.
+
+Generate results on the supplied GT2N grid, then select the GDS backend:
+
+```bash
+make smtcell_config CELL_PREFIX=GT2N CPP=42 M1P=42 CELL_NAME=INV_X1
+make smtcell_spnr CELL_PREFIX=GT2N CPP=42 M1P=42 CELL_NAME=INV_X1
+make gt2n_gds CELL_PREFIX=GT2N CPP=42 M1P=42 CELL_NAME=INV_X1
+```
+
+`TECH=FinFET` remains the placement model; `gt2n_gds` selects `GDS_TECH=GT2N`
+only for export. The included `.layer` file supplies the GT2N routing pitches
+and widths. Existing PROBE3 results must be regenerated on that grid; the
+exporter rejects incompatible dimensions instead of rescaling them.
+
+For an existing result, the equivalent Python entry point is:
+
+```bash
+python -m src.gds.gds_GT2N_SH \
+  --result_file output/GT2N_FinFET_2F_4T_4242OF0/SH/result/INV_X1.res \
+  --subckt_name INV_X1 \
+  --gds_file output/GT2N_FinFET_2F_4T_4242OF0/SH/gds/gt2n_w31_svt.gds \
+  --nanosheet_width 31 --vt svt
+```
+
+For Make, use `GT2N_WIDTH=31 GT2N_VT=svt` and optionally `GDS_FILE=path.gds`.
+Use separate files for different flavors: re-exporting a cell replaces that
+cell by name while preserving the other cells and references in the library.
+The Python API is `GT2NLayout(result_file, subckt_name, gds_file,
+nanosheet_width=13, vt="lvt")` in `src.gds.gds_GT2N_SH`.
+
+The backend emits ACT/GATE/DUMMY/GCUT, SDCON, distinct VG/VSD contacts,
+BPR/VBPR supply connections, M0–M2 routing, datatype-251 pin rectangles and
+labels, and the GT2N `235/250` boundary. It uses a 0.5 nm database unit.
+GT2N exports skip `relocatePin.py`, which uses PROBE3 layer numbers. The
+existing LEF and evaluation scripts also target PROBE3 and are not a GT2N
+signoff flow.
+
+This is an **experimental export backend**, not a GT2N-aware constraint model.
+It retains CPCell's four signal-track centers at 36, 60, 84, and 108 nm and
+maps abstract transistor fingers to the selected physical nanosheet width.
+The solver's FinFET device sizing and DRC constraints have not been replaced.
+In particular, GT2N gate-contact clearance, SDCON spacing, route-end spacing,
+and cell-abutment rules need PDK DRC/LVS validation; W31 gate contacts on the
+inner tracks can violate ACT clearance. Basic input validation and checks
+for shorts between exported metal nets do not establish DRC/LVS cleanliness.
+
+Layer assignments and device dimensions are based on the
+[GT2N PDK](https://github.com/azadnaeemi/GT2N), specifically
+`techlib/gt2_techfile.layermap`, `icv_runset/Include`, and the released
+`gt2_6t_inv_x1_w13_lvt` / `gt2_6t_inv_x1_w31_lvt` reference layouts.
+The PDK is not required at export time.
+
+Run the geometry, library-update, and CLI checks with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 ### 3. Debugging tools
 
 | Command | Purpose |

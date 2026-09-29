@@ -5,6 +5,7 @@ import itertools
 from itertools import pairwise
 import logging
 import signal
+from pathlib import Path
 import networkx as nx
 # import src.config as config
 from absl import logging as absl_logging
@@ -56,6 +57,10 @@ class FinFET:
         self.circuit = circuit
         self.output_dir = output_dir
         self.cell_config = config.read(cell_config)
+        # Direct callers need the same output directories as the Make flow.
+        # Create them before constraint logging, cluster plots, or result writes.
+        for subdir in ("result", "constraint", "view"):
+            (Path(self.output_dir) / subdir).mkdir(parents=True, exist_ok=True)
         self.SET = self.cell_config["model_preset"]["value"]
         self.insert_num_db = self.cell_config["insert_num_db"]["value"]
         # ^ speedup

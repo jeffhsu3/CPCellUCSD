@@ -17,6 +17,15 @@ CELL_PREFIX=PROBE3
 TECH=FinFET
 HEIGHT_CONFIG=SH
 
+# GDS backend is independent of the placement model (currently FinFET).
+GDS_TECH?=$(TECH)
+GT2N_WIDTH?=13
+GT2N_VT?=lvt
+GDS_FILE?=$(OUT_DIR)/gds/$(LIBNAME).gds
+ifeq ($(GDS_TECH),GT2N)
+GDS_ARGS=--nanosheet_width $(GT2N_WIDTH) --vt $(GT2N_VT)
+endif
+
 TRACK=4
 CPP=45
 M1P=30
@@ -59,14 +68,22 @@ smtcell_spnr:
 
 smtcell_gds:
 	mkdir -p $(OUT_DIR)/gds
-	$(foreach CELL,$(CELL_NAME),\
-		$(QUEUE) $(PYTHON) -m src.gds.gds_$(TECH)_$(HEIGHT_CONFIG) --result_file $(OUT_DIR)/result/$(CELL).res --subckt_name $(CELL) --gds_file $(OUT_DIR)/gds/$(LIBNAME).gds;)
-	make m0_pin
+	@set -e; for CELL in $(CELL_NAME); do \
+		$(QUEUE) $(PYTHON) -m src.gds.gds_$(GDS_TECH)_$(HEIGHT_CONFIG) --result_file $(OUT_DIR)/result/$$CELL.res --subckt_name $$CELL --gds_file $(GDS_FILE) $(GDS_ARGS); \
+	done
+ifneq ($(GDS_TECH),GT2N)
+	$(MAKE) m0_pin
+endif
+
+# Use already-solved GT2N-grid results. GT2N pins are emitted by the backend;
+# relocatePin.py is specific to PROBE3 layer numbers and must not run here.
+gt2n_gds:
+	$(MAKE) smtcell_gds GDS_TECH=GT2N
 
 m0_pin:
 	$(PYTHON) src/utility/relocatePin.py \
-	--input_gds $(OUT_DIR)/gds/$(LIBNAME).gds \
-	--output_gds $(OUT_DIR)/gds/$(LIBNAME).gds
+	--input_gds $(GDS_FILE) \
+	--output_gds $(GDS_FILE)
 
 gds_to_gdt:
 	mkdir -p $(OUT_DIR)/gdt
