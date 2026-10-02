@@ -22,11 +22,32 @@ The layout generation flow is shown in the below flow chart.
 
 ### 1. Install dependencies
 
+Using **[uv](https://docs.astral.sh/uv/)** (recommended):
+
+```bash
+# Create virtual environment and install all dependencies
+uv sync
+
+# Or create a venv explicitly:
+uv venv
+source .venv/bin/activate
+uv pip install -e .
+```
+
+Alternatively, with traditional `pip`:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 Key packages: `ortools ≥ 9.14`, `klayout ≥ 0.30`, `numpy`, `networkx`, `matplotlib`, `scikit-learn`.
+
+To install the Python package and the `cpcell` / `cpcell-config` commands, run
+`pip install -e .` (or `uv sync`). The import package is `cpcell`; for example,
+`from cpcell.gds.gds_GT2N_SH import GT2NLayout`. Module commands use
+`python -m cpcell` for solving and `python -m cpcell.utility.config` for config
+generation. Existing callers using `src.*` must switch to `cpcell.*` and
+reinstall the package to refresh the console commands.
 
 ### 2. Run the cell generation flow
 
@@ -43,7 +64,7 @@ make smtcell_gds
 
 That's it. Your layouts will appear in `output/<library>/<height>/gds/`.
 
-Both Python entry points (`src.utility.config` and `src.main`) accept absolute
+Both Python entry points (`cpcell.utility.config` and `cpcell.main`) accept absolute
 or relative `--output_dir` paths and create their output directories as needed.
 Wrappers can pass a new output path directly; no pre-created `config/`,
 `result/`, `constraint/`, or `view/` directories are required. For Make, set
@@ -72,7 +93,7 @@ exporter rejects incompatible dimensions instead of rescaling them.
 For an existing result, the equivalent Python entry point is:
 
 ```bash
-python -m src.gds.gds_GT2N_SH \
+python -m cpcell.gds.gds_GT2N_SH \
   --result_file output/GT2N_FinFET_2F_4T_4242OF0/SH/result/INV_X1.res \
   --subckt_name INV_X1 \
   --gds_file output/GT2N_FinFET_2F_4T_4242OF0/SH/gds/gt2n_w31_svt.gds \
@@ -83,7 +104,7 @@ For Make, use `GT2N_WIDTH=31 GT2N_VT=svt` and optionally `GDS_FILE=path.gds`.
 Use separate files for different flavors: re-exporting a cell replaces that
 cell by name while preserving the other cells and references in the library.
 The Python API is `GT2NLayout(result_file, subckt_name, gds_file,
-nanosheet_width=13, vt="lvt")` in `src.gds.gds_GT2N_SH`.
+nanosheet_width=13, vt="lvt")` in `cpcell.gds.gds_GT2N_SH`.
 
 The backend emits ACT/GATE/DUMMY/GCUT, SDCON, distinct VG/VSD contacts,
 BPR/VBPR supply connections, M0–M2 routing, datatype-251 pin rectangles and
@@ -182,6 +203,8 @@ Generated automatically by `make smtcell_config`, then customizable per cell. Pa
 | `mar_c2c_rule` | dict | Center-to-center minimum-area rule per metal layer. |
 | `eol_c2c_rule` | dict | Center-to-center end-of-line rule per metal layer. |
 | `insert_num_db` | int | Extra CPP columns to enlarge the canvas (helps with INFEASIBLE results). |
+| `allow_unequal_rows` | bool | Allow different PMOS/NMOS finger counts and size the canvas from the larger row. Default: `false`. |
+| `enforce_diffusion_alignment` | bool | Require identical diffusion-break columns in both rows. Set `false` for independent breaks. Default: `true`. |
 | `MPO` | int | Minimum pin opening at M2. Recommended: 2 for 4T. |
 | `m0_pin_separation` | bool | Enforce that no two M0 pins share the same row. Reduces coupling risk between adjacent power/signal wires. Default: `false`. |
 | `m0_pin_extension` | bool/int | Extend each M0 pin outward to `vacancy_edges` empty track segments. Improves routability for M0-pinned nets. Default: `true`, `vacancy_edges: 2`. |
@@ -203,6 +226,70 @@ Generated automatically by `make smtcell_config`, then customizable per cell. Pa
 | `use_break_symmetry_for_placement` | bool | Break placement symmetry to prune the search space. |
 | `inject_cluster` | obj | Automatic transistor clustering for large DFFs. Safe at cluster size 2; sizes 4–6 give more speedup but risk INFEASIBLE. |
 
+### Unequal rows and independent diffusion breaks
+
+For a single-height cell with different PMOS/NMOS finger counts, set both
+options in its generated cell JSON:
+
+```json
+"allow_unequal_rows": {"value": true},
+"enforce_diffusion_alignment": {"value": false}
+```
+
+Counts refer to the fingers produced by netlist parsing, including `nfin`
+splitting. Automatic canvas sizing uses the larger row and adds the usual
+`insert_num_db` allowance. The smaller row can leave columns empty without
+inserting extra transistors. Here “unequal rows” means different device counts,
+not different row heights or a multi-height layout.
+
+Independent diffusion breaks also work with equal device counts. A break
+blocks device-layer routing only in its own row; a full-column break requires
+both rows to be empty. The first column may contain a transistor in just one
+row. Existing diffusion-sharing, gate-cut-length, metal, and via constraints
+still apply, so additional canvas space may be necessary.
+
+Old JSON configs keep the default aligned-row behavior. Unequal counts with
+alignment enabled, or without `allow_unequal_rows`, produce an explanatory
+error before model construction. Python callers can also set these options on
+`FinFET_Tech`; explicit cell JSON values take precedence and do not modify the
+shared technology object.
+
+The regression fixture `tests/fixtures/sram6t.cdl` exercises a two-PMOS,
+four-NMOS topology with both options enabled and `insert_num_db=2`. It is a
+solver test using abstract device sizes, not an electrically characterized
+SRAM. Configurable array boundary ports and placement rules are described
+below; per-device GT2N sizing remains separate work.
+The legacy FinFET GDS exporter still assumes paired P/N placements; use the
+GT2N backend for its support of separate row placement, subject to the GT2N
+export limitations described above.
+
+
+### Boundary ports and placement constraints
+
+Per-cell `boundary_ports` and `placement_constraints` options support multiple
+named ports per signal, selectable sides/layers/tracks, and fixed, ordered,
+aligned, or mirrored transistor placement. Both default to empty lists.
+GT2N GDS export extends the solved port attachments to the physical cell edges.
+
+See [the constraint reference](docs/constraints.md) for coordinate conventions,
+JSON examples, and a routed six-port SRAM fixture.
+
+The [GT2N standard-row 6T reproduction](examples/gt2n_sram/README.md) fixes the
+reference placement and lets CPCell route a 210 × 144 nm cell. Both w13 and w31
+versions match the reference's cell/array DRC findings, pass LVS, and pass its
+nominal SPICE checks on the LVS-matched schematic.
+
+The [GT2N thin 6T reproduction](examples/gt2n_thin/README.md) adds a fixed
+four-band N/P/P/N profile and CP-SAT routing for the backside-powered reference.
+The n31/p31, n13/p13, and n31/p13 variants reproduce 84 × 292/288 nm footprints,
+pass cell/array LVS and nominal SPICE checks, and match reference DRC findings.
+Run `.venv/bin/python examples/gt2n_thin/reproduce.py` to generate them.
+
+The [GT2N logic extension](examples/gt2n_logic/README.md) generates NAND4,
+NOR4, AOI221 and OAI221 with automatic placement/routing in a 144 nm row.
+It exports GDS, CDL, LEF and Verilog; `--spice` adds nominal schematic-only
+Liberty characterization after cell and mirrored-abutment DRC/LVS checks.
+Run `.venv/bin/python examples/gt2n_logic/reproduce.py` to generate the batch.
 
 
 ---
@@ -223,7 +310,7 @@ workdir/
 │   ├── logs/                 # Solver logs
 │   ├── result/               # .res (solution) + .var (variables)
 │   └── view/                 # Canvas visualizations (.png)
-├── src/
+├── cpcell/
 │   ├── core/                 # Constraint modeling
 │   ├── gds/                  # GDS generation
 │   ├── solve/                # CP-SAT solver wrappers
@@ -235,6 +322,7 @@ workdir/
 │   └── blockeval/            # Block-level P&R and IR-drop evaluation
 ├── miscellaneous/            # KLayout .lyp tech files
 ├── Makefile
+├── pyproject.toml
 └── requirements.txt
 ```
 

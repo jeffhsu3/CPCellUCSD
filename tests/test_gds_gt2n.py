@@ -8,9 +8,9 @@ import unittest
 
 import klayout.db as pya
 
-from src.gds.gds_GT2N_SH import GT2NLayout
-from src.gds.gds_FinFET_SH import FinFETLayout
-from src.gds.result import parse_result
+from cpcell.gds.gds_GT2N_SH import GT2NLayout
+from cpcell.gds.gds_FinFET_SH import FinFETLayout
+from cpcell.gds.result import parse_result
 
 
 ROOT = Path(__file__).resolve().parents[1]

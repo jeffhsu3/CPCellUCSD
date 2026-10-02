@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 
-from src.gds.result import parse_result
+from cpcell.gds.result import parse_result
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +47,7 @@ class OutputPathsTest(unittest.TestCase):
                 self.assertFalse(target.exists())
                 for _ in range(2):  # Existing directories must work too.
                     self.run_module(
-                        "src.utility.config",
+                        "cpcell.utility.config",
                         "--cell_names",
                         "INV_X1",
                         "--output_dir",
@@ -59,7 +59,7 @@ class OutputPathsTest(unittest.TestCase):
 
     def test_direct_solve_creates_output_tree(self):
         self.run_module(
-            "src.utility.config",
+            "cpcell.utility.config",
             "--cell_names",
             "INV_X1",
             "--output_dir",
@@ -73,10 +73,18 @@ class OutputPathsTest(unittest.TestCase):
 
         for log_constraints in ("False", "True"):
             with self.subTest(log_constraints=log_constraints):
+                run_config = dict(config)
+                if log_constraints == "False":
+                    # Previously generated configs omit the new row options.
+                    run_config.pop("allow_unequal_rows", None)
+                    run_config.pop("enforce_diffusion_alignment", None)
+                    run_config.pop("boundary_ports", None)
+                    run_config.pop("placement_constraints", None)
+                config_path.write_text(json.dumps(run_config))
                 output = self.directory / f"fresh solve {log_constraints}" / "nested"
                 self.assertFalse(output.exists())
                 self.run_module(
-                    "src.main",
+                    "cpcell.main",
                     "--layer",
                     ROOT / "input/config/GT2N_FinFET_2F_4T_4242OF0.layer",
                     "--netlist",

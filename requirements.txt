@@ -1,3 +1,6 @@
+# Direct dependencies for CPCell (synced with pyproject.toml)
+# For modern workflow, use uv:
+#   uv sync
 absl-py
 klayout>=0.30
 matplotlib

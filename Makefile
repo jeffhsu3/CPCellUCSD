@@ -3,7 +3,8 @@
 ################################################
 KLAYOUT=$(shell which klayout)
 # Tools
-PYTHON=$(shell which python3)
+VENV ?= .venv
+PYTHON ?= $(shell if [ -f $(VENV)/bin/python ]; then echo $(VENV)/bin/python; else which python3; fi)
 # GDT to GDS (See PROBE3 for installation)
 GDT2GDS=/usr/local/bin/gdt2gds.Linux
 # GDS to GDT (See PROBE3 for installation)
@@ -53,7 +54,7 @@ XOR2_X1 MUX2_X1 BUF_X1 BUF_X2 BUF_X4 BUF_X8 DFFHQN_X1 LHQ_X1
 ################################################
 smtcell_config:
 	mkdir -p $(OUT_DIR)/config
-	$(QUEUE) $(PYTHON) -m src.utility.config --track $(TRACK) --tech $(TECH) --height_config $(HEIGHT_CONFIG) --cell_names $(CELL_NAME) --output_dir $(OUT_DIR)
+	$(QUEUE) $(PYTHON) -m cpcell.utility.config --track $(TRACK) --tech $(TECH) --height_config $(HEIGHT_CONFIG) --cell_names $(CELL_NAME) --output_dir $(OUT_DIR)
 
 smtcell_spnr: 
 	mkdir -p $(OUT_DIR)
@@ -62,14 +63,14 @@ smtcell_spnr:
 	mkdir -p $(OUT_DIR)/constraint
 	mkdir -p $(OUT_DIR)/view
 	$(foreach CELL,$(CELL_NAME),\
-		$(QUEUE) $(PYTHON) -m src.main --mode spnr --tech $(TECH) --layer $(LAYER_FILE) --lib_name $(LIBNAME) --track $(TRACK) --height_config $(HEIGHT_CONFIG) --cell_config $(OUT_DIR)/config/$(CELL).json --netlist $(CDL_FILE) --cell_names $(CELL) 2>&1 --output_dir $(OUT_DIR) --flag_log_constraints $(FLAG_LOG_CONSTR) | tee $(OUT_DIR)/logs/$(CELL).log;\
-		$(QUEUE) ./src/utility/drop_prev.sh $(OUT_DIR)/constraint/$(CELL).log > $(OUT_DIR)/constraint/$(CELL)_clean.log;\
+		$(QUEUE) $(PYTHON) -m cpcell.main --mode spnr --tech $(TECH) --layer $(LAYER_FILE) --lib_name $(LIBNAME) --track $(TRACK) --height_config $(HEIGHT_CONFIG) --cell_config $(OUT_DIR)/config/$(CELL).json --netlist $(CDL_FILE) --cell_names $(CELL) 2>&1 --output_dir $(OUT_DIR) --flag_log_constraints $(FLAG_LOG_CONSTR) | tee $(OUT_DIR)/logs/$(CELL).log;\
+		$(QUEUE) ./cpcell/utility/drop_prev.sh $(OUT_DIR)/constraint/$(CELL).log > $(OUT_DIR)/constraint/$(CELL)_clean.log;\
 		rm -f $(OUT_DIR)/constraint/$(CELL).log;)
 
 smtcell_gds:
 	mkdir -p $(OUT_DIR)/gds
 	@set -e; for CELL in $(CELL_NAME); do \
-		$(QUEUE) $(PYTHON) -m src.gds.gds_$(GDS_TECH)_$(HEIGHT_CONFIG) --result_file $(OUT_DIR)/result/$$CELL.res --subckt_name $$CELL --gds_file $(GDS_FILE) $(GDS_ARGS); \
+		$(QUEUE) $(PYTHON) -m cpcell.gds.gds_$(GDS_TECH)_$(HEIGHT_CONFIG) --result_file $(OUT_DIR)/result/$$CELL.res --subckt_name $$CELL --gds_file $(GDS_FILE) $(GDS_ARGS); \
 	done
 ifneq ($(GDS_TECH),GT2N)
 	$(MAKE) m0_pin
@@ -81,7 +82,7 @@ gt2n_gds:
 	$(MAKE) smtcell_gds GDS_TECH=GT2N
 
 m0_pin:
-	$(PYTHON) src/utility/relocatePin.py \
+	$(PYTHON) cpcell/utility/relocatePin.py \
 	--input_gds $(GDS_FILE) \
 	--output_gds $(GDS_FILE)
 
@@ -96,7 +97,7 @@ gdt_to_gds:
 smtcell_lef:
 	make gds_to_gdt
 	mkdir -p $(OUT_DIR)/lef
-	$(PYTHON) src/utility/genLEF.py \
+	$(PYTHON) cpcell/utility/genLEF.py \
 	$(OUT_DIR)/gdt/$(LIBNAME).gdt \
 	$(OUT_DIR)/lef/$(LIBNAME).lef
 
@@ -112,9 +113,17 @@ viewstatus:
 viewcell:
 	mkdir -p $(OUT_DIR)/view
 	$(foreach CELL,$(CELL_NAME),\
-		$(QUEUE) $(PYTHON) -m src.visual.visualize_$(TECH)_$(TRACK)T $(OUT_DIR)/result/$(CELL).res $(OUT_DIR)/view/$(CELL).png;)
+		$(QUEUE) $(PYTHON) -m cpcell.visual.visualize_$(TECH)_$(TRACK)T $(OUT_DIR)/result/$(CELL).res $(OUT_DIR)/view/$(CELL).png;)
 
 check_duplicate_vars:
 	mkdir -p $(OUT_DIR)/debug
 	$(foreach CELL,$(CELL_NAME),\
 		sort $(OUT_DIR)/result/$(CELL_PREFIX)_$(CELL).var | uniq -d > $(OUT_DIR)/debug/$(CELL)_duplicate_vars.txt;)
+
+venv:
+	uv sync
+
+test:
+	$(PYTHON) -m unittest discover -s tests -v
+
+.PHONY: venv test smtcell_config smtcell_spnr smtcell_gds gt2n_gds m0_pin gds_to_gdt gdt_to_gds smtcell_lef viewstatus viewcell check_duplicate_vars

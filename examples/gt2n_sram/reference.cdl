@@ -1,0 +1,8 @@
+.SUBCKT SRAM6T_REF WL BL BLN VDD VSS
+MPDL Q QB VSS VSS nmos w=46n l=14n nfin=2
+MPDR QB Q VSS VSS nmos w=46n l=14n nfin=2
+MPUL Q QB VDD VDD pmos w=46n l=14n nfin=2
+MPUR QB Q VDD VDD pmos w=46n l=14n nfin=2
+MPGL BL WL Q VSS nmos w=46n l=14n nfin=2
+MPGR BLN WL QB VSS nmos w=46n l=14n nfin=2
+.ENDS SRAM6T_REF

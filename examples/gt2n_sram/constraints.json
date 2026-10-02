@@ -1,0 +1,142 @@
+{
+  "layout_profile": {
+    "value": "gt2n_sram"
+  },
+  "routing_layers": {
+    "value": [
+      "M0",
+      "M1"
+    ]
+  },
+  "allow_unequal_rows": {
+    "value": true
+  },
+  "enforce_diffusion_alignment": {
+    "value": false
+  },
+  "insert_num_db": {
+    "value": 0
+  },
+  "minimum_gate_cut_length": {
+    "value": 1
+  },
+  "supervia": {
+    "value": [
+      "M0"
+    ]
+  },
+  "MPO": {
+    "value": 0
+  },
+  "num_search_workers": {
+    "value": 1
+  },
+  "routing_tolerance": {
+    "value": false
+  },
+  "boundary_ports": {
+    "value": [
+      {
+        "name": "WL_left",
+        "net": "WL",
+        "side": "left",
+        "layer": "M0",
+        "track": 0
+      },
+      {
+        "name": "WL_right",
+        "net": "WL",
+        "side": "right",
+        "layer": "M0",
+        "track": 0
+      },
+      {
+        "name": "BL_top",
+        "net": "BL",
+        "side": "top",
+        "layer": "M1",
+        "track": 0
+      },
+      {
+        "name": "BL_bottom",
+        "net": "BL",
+        "side": "bottom",
+        "layer": "M1",
+        "track": 0
+      },
+      {
+        "name": "BLN_top",
+        "net": "BLN",
+        "side": "top",
+        "layer": "M1",
+        "track": 3
+      },
+      {
+        "name": "BLN_bottom",
+        "net": "BLN",
+        "side": "bottom",
+        "layer": "M1",
+        "track": 3
+      }
+    ]
+  },
+  "placement_constraints": {
+    "value": [
+      {
+        "type": "fixed",
+        "transistor": "MPDLS0",
+        "column": 3,
+        "flip": false
+      },
+      {
+        "type": "fixed",
+        "transistor": "MPDRS0",
+        "column": 5,
+        "flip": true
+      },
+      {
+        "type": "fixed",
+        "transistor": "MPULS0",
+        "column": 3,
+        "flip": false
+      },
+      {
+        "type": "fixed",
+        "transistor": "MPURS0",
+        "column": 5,
+        "flip": true
+      },
+      {
+        "type": "fixed",
+        "transistor": "MPGLS0",
+        "column": 1,
+        "flip": false
+      },
+      {
+        "type": "fixed",
+        "transistor": "MPGRS0",
+        "column": 7,
+        "flip": true
+      }
+    ]
+  },
+  "mar_c2c_rule": {
+    "value": {
+      "M0": 20,
+      "M1": 60,
+      "M2": 90
+    }
+  },
+  "contact_rows": {
+    "value": {
+      "gate": [
+        0,
+        2
+      ],
+      "diffusion": [
+        1,
+        3
+      ]
+    }
+  }
+}

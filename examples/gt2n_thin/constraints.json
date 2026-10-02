@@ -1,0 +1,78 @@
+{
+  "placement": {
+    "MPGLS0": {
+      "band": 0,
+      "slot": 0,
+      "flip": false
+    },
+    "MPDLS0": {
+      "band": 0,
+      "slot": 1,
+      "flip": false
+    },
+    "MPULS0": {
+      "band": 1,
+      "slot": 1,
+      "flip": false
+    },
+    "MPURS0": {
+      "band": 2,
+      "slot": 0,
+      "flip": true
+    },
+    "MPDRS0": {
+      "band": 3,
+      "slot": 0,
+      "flip": true
+    },
+    "MPGRS0": {
+      "band": 3,
+      "slot": 1,
+      "flip": true
+    }
+  },
+  "ports": [
+    {
+      "name": "WL_bottom",
+      "net": "WL",
+      "side": "bottom",
+      "layer": "M1",
+      "track": 1
+    },
+    {
+      "name": "WL_top",
+      "net": "WL",
+      "side": "top",
+      "layer": "M1",
+      "track": 1
+    },
+    {
+      "name": "BL_left",
+      "net": "BL",
+      "side": "left",
+      "layer": "M0",
+      "track": 1
+    },
+    {
+      "name": "BL_right",
+      "net": "BL",
+      "side": "right",
+      "layer": "M0",
+      "track": 1
+    },
+    {
+      "name": "BLN_left",
+      "net": "BLN",
+      "side": "left",
+      "layer": "M0",
+      "track": 4
+    },
+    {
+      "name": "BLN_right",
+      "net": "BLN",
+      "side": "right",
+      "layer": "M0",
+      "track": 4
+    }
+  ]
+}

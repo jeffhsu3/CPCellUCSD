@@ -1,0 +1,68 @@
+{
+  "allow_unequal_rows": {
+    "value": true
+  },
+  "enforce_diffusion_alignment": {
+    "value": false
+  },
+  "insert_num_db": {
+    "value": 4
+  },
+  "boundary_ports": {
+    "value": [
+      {
+        "name": "WL_left",
+        "net": "WL",
+        "side": "left",
+        "layer": "M2",
+        "track": 0
+      },
+      {
+        "name": "WL_right",
+        "net": "WL",
+        "side": "right",
+        "layer": "M2",
+        "track": 0
+      },
+      {
+        "name": "BL_bottom",
+        "net": "BL",
+        "side": "bottom",
+        "layer": "M1",
+        "track": 1
+      },
+      {
+        "name": "BL_top",
+        "net": "BL",
+        "side": "top",
+        "layer": "M1",
+        "track": 1
+      },
+      {
+        "name": "BLB_bottom",
+        "net": "BLB",
+        "side": "bottom",
+        "layer": "M1",
+        "track": 5
+      },
+      {
+        "name": "BLB_top",
+        "net": "BLB",
+        "side": "top",
+        "layer": "M1",
+        "track": 5
+      }
+    ]
+  },
+  "placement_constraints": {
+    "value": [
+      {
+        "type": "order",
+        "transistors": [
+          "MA0S0",
+          "MA1S0"
+        ]
+      }
+    ]
+  }
+}

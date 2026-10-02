@@ -2,7 +2,7 @@
 Signoff checks for generated FinFET standard-cell library GDS files (one GDS
 per LIBNAME, one top cell per standard cell, e.g.
 output/<LIBNAME>/SH/gds/<LIBNAME>.gds -- see the smtcell_gds Makefile target
-and src/gds/gds_FinFET_SH.py). Four independent checks:
+and cpcell/gds/gds_FinFET_SH.py). Four independent checks:
 
   - gate-cut: consecutive (multi-CPP) gate cuts on layer 10/0
   - eol:      End-of-Line metal spacing on M0/M1/M2
@@ -11,7 +11,7 @@ and src/gds/gds_FinFET_SH.py). Four independent checks:
 
 === gate-cut ===
 
-`FinFETLayout.__gate_cut_boundary__`/`__gate_cut__` in src/gds/gds_FinFET_SH.py
+`FinFETLayout.__gate_cut_boundary__`/`__gate_cut__` in cpcell/gds/gds_FinFET_SH.py
 draw three different kinds of box onto GateCut layer 10/0:
   - a per-track cut wherever a PMOS/NMOS pair on the same gate track needs
     different signals (the real "gate cut" markers we care about here)
@@ -19,7 +19,7 @@ draw three different kinds of box onto GateCut layer 10/0:
   - full-width VDD/VSS power-rail boxes at the top/bottom of the cell
 
 Only the first kind is subject to the solver's `minimum_gate_cut_length`
-config (src/utility/config.py, enforced in src/core/routing.py's
+config (cpcell/utility/config.py, enforced in cpcell/core/routing.py's
 gate_cut_window()): "gate cut is continuous and is at least X CPP long".
 Two adjacent per-track cuts, one CPP pitch apart center-to-center, is how a
 merged/continuous 2-CPP gate cut shows up in the GDS (there is no single
@@ -35,8 +35,8 @@ horizontal layers, column for vertical) and checked against a real,
 physical nm threshold supplied directly by the caller (`--eol-nm`/
 `--mar-nm`, e.g. an actual foundry DRC value) -- NOT derived from this
 repo's own solver config (`eol_c2c_rule`/`mar_c2c_rule` in
-src/utility/config.py, enforced during solving by src/core/metal_rule.py on
-a 2x-rescaled internal grid, see SOLVER_RESCALE in src/gds/gds_FinFET_SH.py).
+cpcell/utility/config.py, enforced during solving by cpcell/core/metal_rule.py on
+a 2x-rescaled internal grid, see SOLVER_RESCALE in cpcell/gds/gds_FinFET_SH.py).
 EOL measures the literal edge-to-edge gap between the facing ends of two
 distinct same-track polygons; MAR measures the literal length of each
 polygon along its layer's routing direction. This is a real signoff check
@@ -51,18 +51,18 @@ standard-cell abutment (no flip) -- and looks for new EOL violations that
 only appear because of that translation (an existing violation entirely
 inside one cell should already have been caught by the plain `eol` check).
 Every M0/M1/M2 shape is used, since in the generated LEF
-(src/utility/genLEF.py) every metal shape is classified as exactly one of
+(cpcell/utility/genLEF.py) every metal shape is classified as exactly one of
 PIN (has an overlapping net label) or OBS (does not) -- OBS+PIN together is
 the complete physical metal footprint of the cell. Like `eol`, its
 threshold is a real, physical nm value supplied directly by the caller
 (`--eol-nm`), not derived from this repo's own solver config.
 
 Usage:
-    python -m src.utility.signoff gate-cut --gds output/<LIBNAME>/SH/gds/<LIBNAME>.gds
-    python -m src.utility.signoff gate-cut --gds <path> --min-cpp 2 --csv report.csv
-    python -m src.utility.signoff eol --gds <path> --layer-config <path>.layer --eol-nm M0=10 M1=24 M2=22.5
-    python -m src.utility.signoff mar --gds <path> --layer-config <path>.layer --mar-nm M0=10 M1=72 M2=45
-    python -m src.utility.signoff abutment --gds <path> --layer-config <path>.layer --eol-nm M0=10 M1=24 M2=22.5 \\
+    python evaluation/libgen/1:1GR/scripts/signoff.py gate-cut --gds output/<LIBNAME>/SH/gds/<LIBNAME>.gds
+    python evaluation/libgen/1:1GR/scripts/signoff.py gate-cut --gds <path> --min-cpp 2 --csv report.csv
+    python evaluation/libgen/1:1GR/scripts/signoff.py eol --gds <path> --layer-config <path>.layer --eol-nm M0=10 M1=24 M2=22.5
+    python evaluation/libgen/1:1GR/scripts/signoff.py mar --gds <path> --layer-config <path>.layer --mar-nm M0=10 M1=72 M2=45
+    python evaluation/libgen/1:1GR/scripts/signoff.py abutment --gds <path> --layer-config <path>.layer --eol-nm M0=10 M1=24 M2=22.5 \\
         --cell-a INV_X1 NAND2_X1 --cell-b INV_X1 NAND2_X1
 """
 
@@ -88,7 +88,7 @@ DEFAULT_TOLERANCE_NM = 1.0
 METAL_LAYER_NAMES = ("M0", "M1", "M2")
 
 # M0/M2 route horizontally and M1 routes vertically in every tech variant
-# this repo generates (src/gds/gds_FinFET_SH.py, evaluation/libgen/*/scripts/
+# this repo generates (cpcell/gds/gds_FinFET_SH.py, evaluation/libgen/*/scripts/
 # genGdsLef.py); a Cadence .tf tech file doesn't record direction itself
 # (unlike the .layer JSON configs), so it's fixed here instead of guessed.
 TF_LAYER_DIRECTION = {"M0": "H", "M1": "V", "M2": "H"}
