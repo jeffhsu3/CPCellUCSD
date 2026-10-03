@@ -8,9 +8,9 @@ from src.core import metal_rule, via_rule
 from src.solve.graph import LayeredGridGraph
 
 
-def track_model(direction, coordinates):
+def grid_model(direction, rows, cols):
+    """Three-layer grid whose middle layer M0 runs in ``direction``."""
     layers = {0: "PC", 1: "M0", 2: "M1"}
-    rows, cols = ([0], coordinates) if direction == "H" else (coordinates, [0])
     graph = LayeredGridGraph(
         {name: rows for name in layers.values()},
         {name: cols for name in layers.values()}, layers,
@@ -22,6 +22,11 @@ def track_model(direction, coordinates):
     cell = SimpleNamespace(opt=model, lgg=graph, geometric_vars={},
                            edge_vars={edge: model.NewBoolVar(str(edge)) for edge in graph.edges()})
     return cell
+
+
+def track_model(direction, coordinates):
+    rows, cols = ([0], coordinates) if direction == "H" else (coordinates, [0])
+    return grid_model(direction, rows, cols)
 
 
 def solve(cell):
@@ -52,6 +57,27 @@ def test_via_spacing(direction, positions, minimum, feasible):
     set_geometry(cell, direction, [], [(p, 0) for p in positions])
     via_rule.via_separation_rules(cell, {("PC", "M0"): minimum})
     assert solve(cell) == (cp_model.OPTIMAL if feasible else cp_model.INFEASIBLE)
+
+
+@pytest.mark.parametrize("minimum,feasible", [
+    (15, True),  # Manhattan distance is 20; Chebyshev or single-axis distance would be 10
+    (20, True),
+    (21, False),
+])
+def test_via_spacing_is_manhattan(minimum, feasible):
+    cell = grid_model("H", [0, 10], [0, 10])
+    vias = {(0, 0), (10, 10)}
+    for (u, v), var in cell.edge_vars.items():
+        if u[0] != v[0]:
+            cell.opt.Add(var == int(min(u[0], v[0]) == 0 and (u[1], u[2]) in vias))
+    via_rule.via_separation_rules(cell, {("PC", "M0"): minimum})
+    assert solve(cell) == (cp_model.OPTIMAL if feasible else cp_model.INFEASIBLE)
+
+
+def test_via_spacing_rejects_layer_pair_without_candidates():
+    cell = track_model("H", [0, 10])
+    with pytest.raises(ValueError, match="no via candidates"):
+        via_rule.via_separation_rules(cell, {("PC", "M1"): 15})  # not adjacent
 
 
 @pytest.mark.parametrize("direction", ["H", "V"])
