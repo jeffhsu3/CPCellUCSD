@@ -3,8 +3,6 @@ Via-related design rules for FinFET layout optimization.
 This module contains constraints for via induction and via-metal connectivity.
 """
 
-from absl import logging as absl_logging
-
 
 def via_induce_vertical_metal(finfet, supervia_params):
     """
@@ -107,80 +105,6 @@ def via_induce_horizontal_metal(finfet, supervia_params):
         finfet.opt.AddImplication(via_edge, has_metal_connection_var)
 
 
-def _gather_bottom_via_between_nodes(finfet, layer_idx, u_1, u_2):
-    """
-    Helper function to gather via edges between two nodes u_1 and u_2 on a specific layer.
-    Returns a list of via edges if they exist, otherwise returns an empty list.
-
-    Args:
-        finfet: The FinFET instance
-        layer_idx: The layer index
-        u_1: First node tuple (layer_idx, row, col)
-        u_2: Second node tuple (layer_idx, row, col)
-
-    Returns:
-        List of via edge variables
-    """
-    via_edges = []
-    assert finfet.lgg.is_node_in_graph(u_1), f"Node {u_1} does not exist in the graph"
-    assert finfet.lgg.is_node_in_graph(u_2), f"Node {u_2} does not exist in the graph"
-    assert layer_idx == u_1[0] == u_2[0], f"Layer index mismatch: {layer_idx} != {u_1[0]} or {u_2[0]}"
-
-    if finfet.lgg.layer_to_direction[finfet.lgg.idx_to_layer[layer_idx]] == "V":
-        assert u_1[2] == u_2[2], f"Nodes {u_1} and {u_2} must be in the same column for vertical layers"
-        bottom_layer_idx = layer_idx - 1
-        if bottom_layer_idx < 0:
-            return via_edges
-        start_row = min(u_1[1], u_2[1])
-        end_row = max(u_1[1], u_2[1])
-        col = u_1[2]
-
-        # get the nearest node in the bottom layer
-        nearest_node = finfet.lgg.get_nearest_node_in_layer(layer=bottom_layer_idx, row=start_row, col=u_1[2])
-        assert nearest_node is not None, f"No nearest node found in layer {bottom_layer_idx} at column {u_1[2]}"
-        # latch on to the nearest node and start iterating through the rows
-        current_row = nearest_node[1]
-        for row in finfet.lgg.get_layer_rows_starting_from(layer=bottom_layer_idx, row=current_row):
-            if not (start_row <= row <= end_row):
-                continue
-            current_bottom_node = (bottom_layer_idx, row, col)
-            # check if the current bottom node has a via above
-            if finfet.lgg.has_via_above(node=current_bottom_node):
-                nn_above = finfet.lgg.get_via_above(node=current_bottom_node)
-                via_edge = finfet.edge_vars.get((current_bottom_node, nn_above))
-                assert via_edge is not None, f"Via edge between {current_bottom_node} and {nn_above} does not exist"
-                via_edges.append(via_edge)
-
-    elif finfet.lgg.layer_to_direction[finfet.lgg.idx_to_layer[layer_idx]] == "H":
-        assert u_1[1] == u_2[1], f"Nodes {u_1} and {u_2} must be in the same row for horizontal layers"
-        bottom_layer_idx = layer_idx - 1
-        if bottom_layer_idx < 0:
-            return via_edges
-        start_col = min(u_1[2], u_2[2])
-        end_col = max(u_1[2], u_2[2])
-        row = u_1[1]
-
-        # get the nearest node in the bottom layer
-        nearest_node = finfet.lgg.get_nearest_node_in_layer(layer=bottom_layer_idx, row=u_1[1], col=start_col)
-        assert nearest_node is not None, f"No nearest node found in layer {bottom_layer_idx} at row {u_1[1]}"
-        # latch on to the nearest node and start iterating through the columns
-        current_col = nearest_node[2]
-        for col in finfet.lgg.get_layer_cols_starting_from(layer=bottom_layer_idx, col=current_col):
-            if not (start_col <= col <= end_col):
-                continue
-            current_bottom_node = (bottom_layer_idx, row, col)
-            # check if the current bottom node has a via above
-            if finfet.lgg.has_via_above(node=current_bottom_node):
-                nn_above = finfet.lgg.get_via_above(node=current_bottom_node)
-                via_edge = finfet.edge_vars.get((current_bottom_node, nn_above))
-                assert via_edge is not None, f"Via edge between {current_bottom_node} and {nn_above} does not exist"
-                via_edges.append(via_edge)
-    else:
-        raise ValueError(f"Layer {finfet.lgg.idx_to_layer[layer_idx]} is neither horizontal nor vertical")
-
-    return via_edges
-
-
 def _metal_segments_connected_to_via(finfet, direction):
     """Require a via somewhere on each continuous metal segment.
 
@@ -250,6 +174,11 @@ def via_separation_rules(finfet_instance, via_params):
             (u, edge) for (u, v), edge in finfet_instance.edge_vars.items()
             if u[0] != v[0] and {u[0], v[0]} == indices
         ]
+        if not candidates:
+            raise ValueError(
+                f"via_c2c_rule: no via candidates between {layer_1!r} and {layer_2!r}; "
+                "the two layers must be adjacent in the routing stack"
+            )
         for i, (u, edge) in enumerate(candidates):
             for v, other in candidates[i + 1:]:
                 if abs(u[1] - v[1]) + abs(u[2] - v[2]) < via_dist:
