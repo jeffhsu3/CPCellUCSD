@@ -31,11 +31,19 @@ def close_boxes(a, b, spacing):
     """Whether rectangles overlap/touch or violate a positive edge spacing."""
     dx = max(a[0] - b[2], b[0] - a[2])
     dy = max(a[1] - b[3], b[1] - a[3])
+    if isinstance(spacing, dict):
+        if dx <= 0 and dy <= 0:
+            return True
+        if dy <= 0:
+            return dx < spacing["horizontal"]
+        if dx <= 0:
+            return dy < spacing["vertical"]
+        return dx * dx + dy * dy < spacing["corner"] ** 2
     return (dx <= 0 and dy <= 0) or (dx < spacing and dy < spacing)
 
 
 class BandRouter:
-    def __init__(self, edges, terminals, ports, spacing=None):
+    def __init__(self, edges, terminals, ports, spacing=None, *, matching=None):
         self.edges = list(edges)
         self.terminals = terminals
         self.ports = ports
@@ -53,6 +61,8 @@ class BandRouter:
         for usage in self.node_usage.values():
             self.model.AddAtMostOne(usage)
         self._geometry_constraints()
+        self.matching = matching or {}
+        self._matching_constraints()
         self.model.Minimize(
             sum(
                 edge.cost * self.used[net, i]
@@ -60,6 +70,109 @@ class BandRouter:
                 for edge in [self.edges[i]]
             )
         )
+
+    def _matching_constraints(self):
+        """Hard geometric mirror and per-layer length/via-count constraints.
+
+        Coordinates use the adapter's integer units. Matching physical route
+        lengths is a geometric proxy, not a claim of equal extracted RC.
+        """
+        self.mirror_edges = []
+        self.balance_terms = []
+        if set(self.matching) - {
+            "mirror_x",
+            "mirror_nets",
+            "mirror_contact_nets",
+            "balanced_nets",
+        }:
+            raise ValueError("Unknown routing matching option")
+        pairs = [(a, b, False) for a, b in self.matching.get("mirror_nets", [])]
+        pairs += [(a, b, True) for a, b in self.matching.get("mirror_contact_nets", [])]
+        axis = self.matching.get("mirror_x")
+        if pairs and type(axis) is not int:
+            raise ValueError("mirror_x must be an integer coordinate")
+
+        def signature(edge, reflect=False):
+            shapes = []
+            for s in edge.shapes:
+                x0, y0, x1, y1 = s.box
+                shapes.append(
+                    (
+                        s.layer,
+                        (2 * axis - x1, y0, 2 * axis - x0, y1) if reflect else s.box,
+                    )
+                )
+            return tuple(sorted(shapes))
+
+        for a, b, contacts_only in pairs:
+            if a not in self.nets or b not in self.nets:
+                raise ValueError("Matched nets must exist")
+            lookup = {}
+
+            def eligible(edge):
+                return not contacts_only or any(
+                    s.layer in ("VG", "VSD") for s in edge.shapes
+                )
+
+            for i, edge in enumerate(self.edges):
+                if (b, i) in self.used and eligible(edge):
+                    key = signature(edge)
+                    if key in lookup:
+                        raise ValueError("Ambiguous mirrored route geometry")
+                    lookup[key] = i
+            mapped = set()
+            for i, edge in enumerate(self.edges):
+                if (a, i) not in self.used or not eligible(edge):
+                    continue
+                j = lookup.get(signature(edge, True))
+                self.model.Add(self.used[a, i] == (0 if j is None else self.used[b, j]))
+                self.mirror_edges.append(((a, i), None if j is None else (b, j)))
+                if j is not None:
+                    mapped.add(j)
+            for j in set(lookup.values()) - mapped:
+                self.model.Add(self.used[b, j] == 0)
+                self.mirror_edges.append(((b, j), None))
+        for a, b in self.matching.get("balanced_nets", []):
+            if a not in self.nets or b not in self.nets or a == b:
+                raise ValueError("Balanced nets must be distinct existing nets")
+            metrics = sorted(set().union(*(self.edge_metrics(e) for e in self.edges)))
+            for metric in metrics:
+                terms = {
+                    net: [
+                        (i, self.edge_metrics(edge).get(metric, 0))
+                        for i, edge in enumerate(self.edges)
+                        if (net, i) in self.used
+                    ]
+                    for net in (a, b)
+                }
+                self.model.Add(
+                    sum(weight * self.used[a, i] for i, weight in terms[a])
+                    == sum(weight * self.used[b, i] for i, weight in terms[b])
+                )
+                self.balance_terms.append((a, b, metric, terms))
+
+    @staticmethod
+    def edge_metrics(edge):
+        metrics = {}
+        if edge.u[0] != "T" and edge.v[0] != "T" and edge.u[0] == edge.v[0]:
+            layer = edge.shapes[0].layer
+            metrics[layer + "_length"] = abs(edge.u[1] - edge.v[1]) + abs(
+                edge.u[2] - edge.v[2]
+            )
+        for shape in edge.shapes:
+            if shape.layer in ("VG", "VSD", "V0", "V1", "V2"):
+                metrics[shape.layer + "_count"] = (
+                    metrics.get(shape.layer + "_count", 0) + 1
+                )
+        return metrics
+
+    def route_metrics(self, routes):
+        result = {net: {} for net in self.nets}
+        for route in routes:
+            for key, value in self.edge_metrics(self.edges[route["edge"]]).items():
+                values = result[route["net"]]
+                values[key] = values.get(key, 0) + value
+        return result
 
     def _net_constraints(self, net):
         source = self.terminals[net][0]
@@ -96,6 +209,26 @@ class BandRouter:
         # already represented by a single terminal, not independent fake pins.
         for node in self.terminals[net]:
             self.model.Add(sum(incident.get(node, [])) == 1)
+        # Every selected node consumes one unit from the root. Unlike terminal
+        # flow alone, this excludes detached cycles used to pad matched lengths.
+        active = {}
+        reach_in, reach_out = {}, {}
+        for node in sorted(nodes - {source}, key=repr):
+            active[node] = self.model.NewBoolVar(f"reached_{net}_{node}")
+            self.model.AddMaxEquality(active[node], incident.get(node, [0]))
+        for i, edge in enumerate(self.edges):
+            if (net, i) not in self.used:
+                continue
+            for u, v, suffix in ((edge.u, edge.v, "f"), (edge.v, edge.u, "b")):
+                flow = self.model.NewIntVar(0, len(nodes), f"reach_{net}_{i}_{suffix}")
+                self.model.Add(flow <= len(nodes) * self.used[net, i])
+                reach_out.setdefault(u, []).append(flow)
+                reach_in.setdefault(v, []).append(flow)
+        for node in sorted(nodes, key=repr):
+            demand = -sum(active.values()) if node == source else active[node]
+            self.model.Add(
+                sum(reach_in.get(node, [])) - sum(reach_out.get(node, [])) == demand
+            )
 
     def _geometry_constraints(self):
         # End extensions and via landings participate in conflicts, even when
@@ -136,6 +269,7 @@ class BandRouter:
             "objective": solver.ObjectiveValue(),
             "wall_time": solver.WallTime(),
             "routes": routes,
+            "route_metrics": self.route_metrics(routes),
         }
 
     def validate(self, routes):
@@ -148,6 +282,15 @@ class BandRouter:
                 raise ValueError("Invalid or duplicated routing edge")
             seen.add((net, i))
             chosen.setdefault(net, []).append(self.edges[i])
+        for a, b in self.mirror_edges:
+            if (a in seen) != (b is not None and b in seen):
+                raise ValueError("Route violates mirror matching")
+        for a, b, metric, terms in self.balance_terms:
+            totals = [
+                sum(w for i, w in terms[net] if (net, i) in seen) for net in (a, b)
+            ]
+            if totals[0] != totals[1]:
+                raise ValueError(f"Route violates {metric} matching for {a}/{b}")
         occupied = {}
         for net in self.nets:
             graph = nx.Graph()
