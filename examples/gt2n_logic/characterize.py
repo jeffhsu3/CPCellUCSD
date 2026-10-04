@@ -8,6 +8,8 @@ from itertools import product
 import math
 import re
 
+from examples.gt2n_logic.cells import library_name
+
 VDD = 0.7
 SLEWS_PS = (10.0, 30.0, 80.0)  # 20-80% input transition times
 LOADS_FF = (0.2, 1.0, 3.0)
@@ -69,10 +71,20 @@ def sensitizations(cell):
                 for level in (0, 1)
             ]
             if outputs[0] != outputs[1]:
-                if outputs != [1, 0]:
-                    raise ValueError("This batch requires negative-unate timing arcs")
                 cases.append((pin, static))
     return cases
+
+
+def timing_senses(cell):
+    """Derive each pin's unate polarity from the independent Boolean spec."""
+    senses = {pin: set() for pin in cell.inputs}
+    for pin, static in sensitizations(cell):
+        high = cell.expected([1 if p == pin else static[p] for p in cell.inputs])
+        senses[pin].add("positive_unate" if high else "negative_unate")
+    for pin, values in senses.items():
+        if len(values) != 1:
+            raise ValueError(f"{cell.name}/{pin} needs exactly one unate timing sense")
+    return {pin: next(iter(values)) for pin, values in senses.items()}
 
 
 def crossing(times, values, threshold, start, stop, rising):
@@ -86,10 +98,28 @@ def crossing(times, values, threshold, start, stop, rising):
     )
 
 
+def measure_timing(times, inputs, outputs, sense, up, down, stop):
+    """Match output transitions to the driving input edge for either polarity."""
+    if sense not in ("positive_unate", "negative_unate"):
+        raise ValueError(f"Unsupported timing sense: {sense}")
+    metrics = {}
+    for start, end, input_rise in [(up, down, True), (down, stop, False)]:
+        rise = input_rise if sense == "positive_unate" else not input_rise
+        name = "rise" if rise else "fall"
+        t_in = crossing(times, inputs, VDD / 2, start, end, input_rise)
+        t_out = crossing(times, outputs, VDD / 2, start, end, rise)
+        t_lo = crossing(times, outputs, VDD * 0.2, start, end, rise)
+        t_hi = crossing(times, outputs, VDD * 0.8, start, end, rise)
+        metrics["cell_" + name] = (t_out - t_in) * 1e12
+        metrics[name + "_transition"] = abs(t_hi - t_lo) * 1e12
+    return metrics
+
+
 def characterize(cell, pdk, directory):
     from scripts.gt2n_spice import run_xyce
 
     cases = sensitizations(cell)
+    senses = timing_senses(cell)
     arcs = {
         pin: {
             metric: [[-math.inf for _ in LOADS_FF] for _ in SLEWS_PS]
@@ -126,17 +156,9 @@ def characterize(cell, pdk, directory):
             times = data["TIME"]
             for i, (pin, static) in enumerate(cases):
                 inputs, outputs = data[f"V(IN{i})"], data[f"V(Y{i})"]
-                metrics = {}
-                for name, start, stop, rise in [
-                    ("fall", up, down, False),
-                    ("rise", down, 1e-9, True),
-                ]:
-                    t_in = crossing(times, inputs, VDD / 2, start, stop, not rise)
-                    t_out = crossing(times, outputs, VDD / 2, start, stop, rise)
-                    t_lo = crossing(times, outputs, VDD * 0.2, start, stop, rise)
-                    t_hi = crossing(times, outputs, VDD * 0.8, start, stop, rise)
-                    metrics["cell_" + name] = (t_out - t_in) * 1e12
-                    metrics[name + "_transition"] = abs(t_hi - t_lo) * 1e12
+                metrics = measure_timing(
+                    times, inputs, outputs, senses[pin], up, down, 1e-9
+                )
                 for metric, value in metrics.items():
                     # A 50%-to-50% propagation delay may be negative for a
                     # slow input and light load. Transition durations may not.
@@ -169,6 +191,7 @@ def characterize(cell, pdk, directory):
         "slews_ps": SLEWS_PS,
         "loads_ff": LOADS_FF,
         "arcs": arcs,
+        "timing_sense": senses,
         "input_capacitance_ff": caps,
         "sensitizations": len(cases),
         "samples": details,
@@ -179,7 +202,7 @@ def characterize(cell, pdk, directory):
 def liberty(cells, report):
     lines = [
         "/* Experimental schematic-only TT characterization; no extracted layout RC. */",
-        "library (gt2_cpcell_w31_lvt_tt_0p7v25c) {",
+        f"library ({library_name(cells)}_tt_0p7v25c) {{",
         "  delay_model : table_lookup;",
         '  time_unit : "1ps";',
         '  voltage_unit : "1V";',
@@ -210,6 +233,7 @@ def liberty(cells, report):
     for cell in cells:
         entry = report["cells"][cell.name]
         char = entry["characterization"]
+        senses = timing_senses(cell)
         lines += [
             f"  cell ({cell.physical_name}) {{",
             f"    area : {entry['area_um2']:.9g};",
@@ -231,7 +255,7 @@ def liberty(cells, report):
             lines += [
                 "      timing () {",
                 f'        related_pin : "{pin}";',
-                "        timing_sense : negative_unate;",
+                f"        timing_sense : {senses[pin]};",
                 "        timing_type : combinational;",
             ]
             for metric, matrix in char["arcs"][pin].items():
