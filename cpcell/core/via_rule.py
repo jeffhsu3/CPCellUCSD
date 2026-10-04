@@ -181,176 +181,76 @@ def _gather_bottom_via_between_nodes(finfet, layer_idx, u_1, u_2):
     return via_edges
 
 
-def vertical_metal_must_be_connected_to_via(finfet):
-    """
-    For each vertical layer, if a node is connected to a vertical metal edge,
-    it must also be connected to a via.
+def _metal_segments_connected_to_via(finfet, direction):
+    """Require a via somewhere on each continuous metal segment.
 
-    Args:
-        finfet: The FinFET instance
+    Scan each track, carrying via reachability only across selected metal
+    edges. At a segment's far end the carry must be true. Vias above or below
+    the layer count; an unused candidate or a via across a gap cannot help.
     """
-    finfet.opt.log_comment("Vertical metal must be connected to a via ...")
+    incident_vias = {}
+    for (u, v), edge in finfet.edge_vars.items():
+        if u[0] != v[0]:
+            incident_vias.setdefault(u, []).append(edge)
+            incident_vias.setdefault(v, []).append(edge)
+
+    horizontal = direction == "H"
     for layer, idx in finfet.lgg.layer_to_idx.items():
-        if finfet.lgg.layer_to_direction[layer] != "V":
+        if idx == 0 or finfet.lgg.layer_to_direction[layer] != direction:
             continue
-        if idx == 0:  # Skip the first layer
-            continue
-        for row in finfet.lgg.rows_in_layer(layer):
-            for col in finfet.lgg.cols_in_layer(layer):
-                u = (idx, row, col)
-                gvf_u = finfet.geometric_vars[u]["front"]
-                current_u = u
-                while True:
-                    u_b = finfet.lgg.get_front_neighbor(current_u)  # BUG: front/back are swapped
-                    if u_b is None:
-                        break
-                    gvb_u = finfet.geometric_vars[u]["back"]
-                    # gather all via edges between u and its back neighbor
-                    via_edges = _gather_bottom_via_between_nodes(finfet, layer_idx=idx, u_1=u, u_2=u_b)
-                    # if there are no via edges, then these two nodes cannot be true together
-                    if not via_edges:
-                        # not((gvf_u and gvb_u))
-                        finfet.opt.AddImplication(gvf_u, gvb_u.Not())
-                        finfet.opt.AddImplication(gvb_u, gvf_u.Not())
-                    else:
-                        # if there are via edges, then we need to ensure that at least one of them is true when gvf_u and gvb_u are true
-                        # Create a variable for the conjunction (gvf_u AND gvb_u)
-                        both_vars = finfet.opt.NewBoolVar(f"both_gv_L{idx}_R{row}_C{col}_and_gvB_L{idx}_R{u_b[1]}_C{u_b[2]}")
+        rows = finfet.lgg.rows_in_layer(layer)
+        cols = finfet.lgg.cols_in_layer(layer)
+        tracks = (
+            [[(idx, row, col) for col in cols] for row in rows]
+            if horizontal else
+            [[(idx, row, col) for row in rows] for col in cols]
+        )
+        for nodes in tracks:
+            previous_reached = None
+            for i, u in enumerate(nodes):
+                incoming = finfet.edge_vars[(nodes[i - 1], u)] if i else None
+                outgoing = finfet.edge_vars[(u, nodes[i + 1])] if i + 1 < len(nodes) else None
+                reasons = list(incident_vias.get(u, []))
+                if incoming is not None:
+                    carry = finfet.opt.NewBoolVar(f"via_carry_{u}")
+                    finfet.opt.AddMinEquality(carry, [incoming, previous_reached])
+                    reasons.append(carry)
+                reached = finfet.opt.NewBoolVar(f"via_reached_{u}")
+                if reasons:
+                    finfet.opt.AddMaxEquality(reached, reasons)
+                else:
+                    finfet.opt.Add(reached == 0)
+                if incoming is not None:
+                    # incoming AND NOT outgoing means this is a segment end.
+                    clause = [incoming.Not(), reached]
+                    if outgoing is not None:
+                        clause.append(outgoing)
+                    finfet.opt.AddBoolOr(clause)
+                previous_reached = reached
 
-                        # Set both_vars to be equivalent to (gvf_u AND gvb_u)
-                        finfet.opt.AddBoolAnd([gvf_u, gvb_u]).OnlyEnforceIf(both_vars)
-                        finfet.opt.Add(gvf_u + gvb_u < 2).OnlyEnforceIf(both_vars.Not())
 
-                        # If both_vars is true, then at least one via edge must be true
-                        # Add a constraint that if both geometric variables are true, at least one via must be true
-                        finfet.opt.Add(sum(via_edges) >= 1).OnlyEnforceIf(both_vars)
-                    current_u = u_b  # Move to the next node in the vertical direction
+def vertical_metal_must_be_connected_to_via(finfet):
+    """Require each vertical metal segment to contact a via."""
+    finfet.opt.log_comment("Vertical metal must be connected to a via ...")
+    _metal_segments_connected_to_via(finfet, "V")
 
 
 def horizontal_metal_must_be_connected_to_via(finfet):
-    """
-    For each horizontal layer, if a node is connected to a horizontal metal edge,
-    it must also be connected to a via.
-
-    Args:
-        finfet: The FinFET instance
-    """
+    """Require each horizontal metal segment to contact a via."""
     finfet.opt.log_comment("Horizontal metal must be connected to a via ...")
-    for layer, idx in finfet.lgg.layer_to_idx.items():
-        if finfet.lgg.layer_to_direction[layer] != "H":
-            continue
-        if idx == 0:
-            continue
-        for row in finfet.lgg.rows_in_layer(layer):
-            for col in finfet.lgg.cols_in_layer(layer):
-                u = (idx, row, col)
-                gvl_u = finfet.geometric_vars[u]["left"]
-                current_u = u
-                while True:
-                    u_r = finfet.lgg.get_right_neighbor(current_u)
-                    if u_r is None:
-                        break
-                    gvr_u = finfet.geometric_vars[u]["right"]
-                    # gather all via edges between u and its right neighbor
-                    via_edges = _gather_bottom_via_between_nodes(finfet, layer_idx=idx, u_1=u, u_2=u_r)
-                    # if there are no via edges, then these two nodes cannot be true together
-                    if not via_edges:
-                        # not((gvl_u and gvr_u))
-                        finfet.opt.AddImplication(gvl_u, gvr_u.Not())
-                        finfet.opt.AddImplication(gvr_u, gvl_u.Not())
-                    else:
-                        # if there are via edges, then we need to ensure that at least one of them is true when gvl_u and gvr_u are true
-                        # Create a variable for the conjunction (gvl_u AND gvr_u)
-                        both_vars = finfet.opt.NewBoolVar(f"both_gv_L{idx}_R{row}_C{col}_and_gvR_L{idx}_R{u_r[1]}_C{u_r[2]}")
+    _metal_segments_connected_to_via(finfet, "H")
 
-                        # Set both_vars to be equivalent to (gvl_u AND gvr_u)
-                        finfet.opt.AddBoolAnd([gvl_u, gvr_u]).OnlyEnforceIf(both_vars)
-                        finfet.opt.Add(gvl_u + gvr_u < 2).OnlyEnforceIf(both_vars.Not())
-
-                        # If both_vars is true, then at least one via edge must be true
-                        # Add a constraint that if both geometric variables are true, at least one via must be true
-                        finfet.opt.Add(sum(via_edges) >= 1).OnlyEnforceIf(both_vars)
-                    current_u = u_r
 
 def via_separation_rules(finfet_instance, via_params):
-    """
-    Enforce via separation rules to ensure vias maintain minimum L1 (Manhattan) distance.
-
-    Args:
-        finfet_instance: The FinFET instance containing the opt, lgg, and edge_vars
-        via_params: Dictionary mapping layer pairs to via separation distance parameters
-    """
-    DEBUG_VR_DIST = False
-    finfet_instance.opt.log_comment(f"Enforcing via separation rules (L1 Manhattan distance)...")
-    for layer_pair, via_dist in via_params.items():
-        layer_1, layer_2 = layer_pair
-        # check layer direction
-        hori_layer, vert_layer = None, None
-        if finfet_instance.lgg.layer_to_direction[layer_1] == "H":
-            hori_layer = layer_1
-            vert_layer = layer_2
-        elif finfet_instance.lgg.layer_to_direction[layer_2] == "H":
-            hori_layer = layer_2
-            vert_layer = layer_1
-        else:
-            raise ValueError(f"Layer {layer_1} and {layer_2} are not horizontal or vertical")
-        
-        # Get all rows and columns
-        all_rows = finfet_instance.lgg.rows_in_layer(hori_layer)
-        all_cols = finfet_instance.lgg.cols_in_layer(vert_layer)
-        
-        for row in all_rows:
-            for col in all_cols:
-                u_1 = (finfet_instance.lgg.layer_to_idx[layer_1], row, col)
-                u_2 = (finfet_instance.lgg.layer_to_idx[layer_2], row, col)
-                via_edge = finfet_instance.edge_vars[(u_1, u_2)]
-                absl_logging.info(f"Node: {u_1} via dist: {via_dist}") if DEBUG_VR_DIST else None
-                # check if the edge exists
-                if via_edge is None:
-                    raise ValueError(f"Edge {u_1} and {u_2} does not exist") if DEBUG_VR_DIST else None
-                
-                via_list = []
-                via_list.append(via_edge)
-                
-                # Iterate over all possible positions within L1 distance
-                # L1 distance = |row_delta| + |col_delta| < via_dist
-                for other_row in all_rows:
-                    row_delta = abs(other_row - row)
-                    if row_delta >= via_dist:
-                        continue  # Too far in row direction alone
-                    
-                    # Calculate remaining distance budget for column
-                    max_col_delta = via_dist - row_delta - 1
-                    
-                    for other_col in all_cols:
-                        col_delta = abs(other_col - col)
-                        
-                        # Skip the current via position
-                        if other_row == row and other_col == col:
-                            continue
-                        
-                        # Check if within L1 distance
-                        l1_distance = row_delta + col_delta
-                        if l1_distance >= via_dist:
-                            continue
-                        
-                        # Check if this via position exists in the graph
-                        u_1_other = (finfet_instance.lgg.layer_to_idx[layer_1], other_row, other_col)
-                        u_2_other = (finfet_instance.lgg.layer_to_idx[layer_2], other_row, other_col)
-                        
-                        if not finfet_instance.lgg.is_node_in_graph(u_2_other):
-                            continue
-                        
-                        # Get the via edge variable
-                        other_via_edge = finfet_instance.edge_vars.get((u_1_other, u_2_other))
-                        if other_via_edge is not None:
-                            via_list.append(other_via_edge)
-                            absl_logging.info(
-                                f"\tBanning via at ({other_row}, {other_col}), "
-                                f"L1 distance: {l1_distance} < {via_dist}"
-                            ) if DEBUG_VR_DIST else None
-                
-                # add the via constraints
-                if len(via_list) > 1:
-                    # At most one via can be active among all vias within L1 distance
-                    finfet_instance.opt.AddAtMostOne(via_list)
+    """Exclude pairs of vias strictly inside the minimum Manhattan distance."""
+    finfet_instance.opt.log_comment("Enforcing via separation rules (L1 Manhattan distance)...")
+    for (layer_1, layer_2), via_dist in via_params.items():
+        indices = {finfet_instance.lgg.layer_to_idx[layer_1], finfet_instance.lgg.layer_to_idx[layer_2]}
+        candidates = [
+            (u, edge) for (u, v), edge in finfet_instance.edge_vars.items()
+            if u[0] != v[0] and {u[0], v[0]} == indices
+        ]
+        for i, (u, edge) in enumerate(candidates):
+            for v, other in candidates[i + 1:]:
+                if abs(u[1] - v[1]) + abs(u[2] - v[2]) < via_dist:
+                    finfet_instance.opt.AddAtMostOne([edge, other])
