@@ -7,6 +7,7 @@ All geometry uses integer half-nanometre units. No routed wires are prescribed.
 
 from dataclasses import dataclass
 from itertools import combinations
+import math
 
 import networkx as nx
 from ortools.sat.python import cp_model
@@ -251,13 +252,30 @@ class BandRouter:
                         self.model.Add(self.used[net, a] + self.used[other, b] <= 1)
 
     def solve(self, seconds=30):
+        result = self.solve_result(seconds)
+        if result["status"] not in ("OPTIMAL", "FEASIBLE"):
+            raise ValueError(f"Fixed-band routing failed: {result['status']}")
+        return result
+
+    def solve_result(self, seconds=30):
+        """Return FEASIBLE/OPTIMAL, INFEASIBLE, or UNKNOWN without conflating them.
+
+        Infeasibility applies only to this candidate graph and its constraints.
+        Unsuccessful results deliberately contain no routes or objective.
+        The existing solve() API continues to raise when no solution is found.
+        """
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("Solver timeout must be finite and positive")
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = seconds
         solver.parameters.num_search_workers = 1
         solver.parameters.random_seed = 32
         status = solver.Solve(self.model)
+        result = {"status": solver.StatusName(status), "wall_time": solver.WallTime()}
+        if status == cp_model.MODEL_INVALID:
+            raise ValueError(f"Invalid routing model: {solver.ResponseStats()}")
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            raise ValueError(f"Fixed-band routing failed: {solver.StatusName(status)}")
+            return result
         routes = [
             {"net": net, "edge": i}
             for (net, i), var in self.used.items()
@@ -265,9 +283,8 @@ class BandRouter:
         ]
         self.validate(routes)
         return {
-            "status": solver.StatusName(status),
+            **result,
             "objective": solver.ObjectiveValue(),
-            "wall_time": solver.WallTime(),
             "routes": routes,
             "route_metrics": self.route_metrics(routes),
         }
