@@ -7,22 +7,22 @@ does not import the sibling repository or copy its routed metal.
 
 ```sh
 python examples/gt2n_sense_amp/reproduce.py
-python examples/gt2n_sense_amp/reproduce.py --spice
 ```
 
-The first command requires only CPCell's dependencies. The second also runs
-platform DRC, transistor LVS against both the generated and reference CDL, and
-the reference transient SPICE benches. `--verify` runs just DRC/LVS. These
-optional checks default to sibling `chipforge_gt2n` and `GT2N` checkouts and the
-reference repository's `.venv/bin/python`. Override them with `--reference-repo`,
-`--pdk-root`, and `--reference-python`; the latter environment must have the
-reference generator dependencies, KLayout, and access to Xyce for SPICE.
+Generation needs only CPCell. Outputs in `build/gt2n_sense_amp/` include GDS,
+CDL, the solution, a generation report and a SHA-256 manifest. Use
+`--output-dir` and `--timeout` to select the destination and solve limit.
 
-Outputs default to `build/gt2n_sense_amp/`; `--output-dir` accepts absolute paths
-and creates missing directories. Outputs include `cell.gds`, `cell.cdl`,
-`solution.json`, `report.json`, and a SHA-256 `manifest.json`. Optional checks
-also write `checks.json`, the reference CDL, and KLayout DRC/LVS databases.
-Reports distinguish generation from physical and electrical verification.
+External verification is maintained in `chipforge_gt2n`. From that checkout:
+
+```sh
+uv run python -m evals.cpcell_sense_amp \
+  --output-dir ../CPCellUCSD/build/gt2n_sense_amp --pdk-root ../GT2N --spice
+```
+
+Omit `--spice` for DRC/LVS only. The evaluator writes `checks.json` and
+physical-check databases beside the generated artifacts. Generation and
+verification have separate reports; inspect `checks.json` for qualification.
 
 ## Exact device geometry
 

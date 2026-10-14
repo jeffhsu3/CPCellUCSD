@@ -128,11 +128,14 @@ these positions without changing the schematic.
 
 ## Physical verification
 
+The evaluator now lives in `chipforge_gt2n`. Run the following from that
+checkout, pointing `--output-dir` at the CPCell output directory.
+
 An optional standalone verifier requires GT2N and compatible KLayout decks:
 
 ```sh
-python examples/gt2n_split_gate/verify.py \
-  --output-dir build/split_w31_168 --pdk-root ../GT2N \
+uv run python -m evals.cpcell_split_gate \
+  --output-dir ../CPCellUCSD/build/split_w31_168 --pdk-root ../GT2N \
   --drc-deck ../GT2N/experimental/cpcell/decapcc/w31/decks/gt2n_overlap.lydrc \
   --lvs-deck ../GT2N/experimental/cpcell/decapcc/w31/decks/gt2n_transistor.lylvs
 ```

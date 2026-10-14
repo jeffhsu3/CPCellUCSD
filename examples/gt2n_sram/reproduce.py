@@ -1,13 +1,11 @@
-"""Reproduce the GT2N standard-row 6T through CPCell, optionally verify it.
+"""Generate the GT2N sram fixture with CPCell only.
 
-The sibling chipforge_gt2n repository is needed only for --verify / --spice.
-Its cell generator supplies the comparison layout, never the CPCell layout.
+External verification lives in chipforge_gt2n/evals/cpcell_reference.py.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 import hashlib
 import json
 import os
@@ -98,119 +96,6 @@ def solve(output, timeout=30):
     return result
 
 
-def verify(output, widths, reference_repo, spice, report):
-    """Use exactly the sibling's platform DRC, LVS, tiling and margin flows."""
-    if not (reference_repo / "scripts/gt2n_sram_bitcell.py").is_file():
-        raise FileNotFoundError(f"No GT2N reference implementation at {reference_repo}")
-    sys.path.insert(0, str(reference_repo))
-    import gdspy
-    from scripts.gt2n_klayout import run_drc, run_lvs
-    from scripts.gt2n_memory_compiler import resolve_gt2n_root
-    from scripts.gt2n_sram_bitcell import (
-        BitcellSpec,
-        array_name,
-        build_library,
-        generate_array,
-        write_netlist,
-    )
-
-    pdk = resolve_gt2n_root()
-    report["pdk"] = str(pdk)
-    report["reference_repo"] = str(reference_repo)
-    report["reference_sources_sha256"] = {
-        name: hashlib.sha256(
-            (reference_repo / "scripts" / name).read_bytes()
-        ).hexdigest()
-        for name in (
-            "gt2n_sram_bitcell.py",
-            "gt2n_klayout.py",
-            "gt2n_transistor.lylvs",
-            "gt2n_sram_margins.py",
-        )
-    }
-    for width in widths:
-        directory = output / f"w{width}"
-        spec = BitcellSpec("6t", f"w{width}", "lvt")
-        reference = build_library([spec], (3, 4))
-        reference.write_gds(str(directory / "reference.gds"))
-        write_netlist([spec], directory / "reference.cdl", (3, 4))
-        # Import the actual CPCell result. Only array placement is reused from
-        # the reference implementation; no reference cell geometry is copied.
-        generated = gdspy.GdsLibrary(unit=1e-9, precision=5e-10)
-        generated.read_gds(str(directory / "cpcell.gds"), units="convert")
-        generated.add(generate_array(spec, 3, 4, generated.cells[spec.name]))
-        generated.write_gds(str(directory / "cpcell_array.gds"))
-        checks = {}
-        report["cells"][f"w{width}"]["verification"] = checks
-        for top in (spec.name, array_name(spec, 3, 4)):
-            checks[top] = {}
-            for source in ("reference", "cpcell_array"):
-                stem = directory / f"{source}_{top}"
-                drc = dict(
-                    run_drc(
-                        directory / f"{source}.gds",
-                        top,
-                        pdk,
-                        stem.with_suffix(".lyrdb"),
-                    )
-                )
-                lvs = run_lvs(
-                    directory / f"{source}.gds",
-                    directory / "reference.cdl",
-                    top,
-                    stem.with_suffix(".lvsdb"),
-                )
-                checks[top][source] = {"drc": drc, "lvs": lvs}
-                print(f"w{width} {source} {top}: DRC {drc}, LVS {lvs}", flush=True)
-            expected = {spec.name: True} | ({top: True} if top != spec.name else {})
-            if any(
-                checks[top][source]["lvs"] != expected
-                for source in ("reference", "cpcell_array")
-            ):
-                raise RuntimeError(f"LVS mismatch for {top}")
-            if checks[top]["reference"]["drc"] != checks[top]["cpcell_array"]["drc"]:
-                raise RuntimeError(f"DRC findings differ from the reference for {top}")
-        if spice:
-            from scripts.gt2n_sram_margins import Bench, characterize
-
-            print(
-                f"w{width}: running Xyce hold/read/write characterization...",
-                flush=True,
-            )
-            margins = characterize(Bench(spec, pdk))
-            report["cells"][f"w{width}"]["spice"] = asdict(margins)
-            # Same nominal acceptance criteria as the reference's margin test.
-            valid = (
-                min(margins.hold_snm) > 0.2
-                and min(margins.read_snm) > 0.08
-                and abs(margins.read_snm[0] - margins.read_snm[1]) < 0.002
-                and 0 < margins.read_bump < min(margins.read_snm) + 0.1
-                and margins.srrv > 0.1
-                and margins.read_upset_pulse is None
-                and margins.bwtv is not None
-                and 0.15 < margins.bwtv < 0.4
-                and margins.wl_write_margin is not None
-                and margins.wl_write_margin > 0.1
-                and margins.iwrite > 0
-                and margins.twrite_ps is not None
-                and margins.write_delay_ps is not None
-                and margins.write_delay_ps < margins.twrite_ps
-            )
-            if not valid:
-                raise RuntimeError(
-                    f"SPICE margins failed nominal acceptance criteria for w{width}"
-                )
-            print(
-                f"w{width}: hold/read SNM {min(margins.hold_snm):.4f}/{min(margins.read_snm):.4f} V, BWTV {margins.bwtv:.4f} V",
-                flush=True,
-            )
-    report["verification_status"] = "passed"
-    if spice:
-        report["spice_scope"] = (
-            "LVS-matched reference schematic, TT 0.7 V/25 C; estimated 0.25 fF storage-node loads, no extracted RC"
-        )
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -218,19 +103,6 @@ def main(argv=None):
     )
     parser.add_argument(
         "--widths", nargs="+", type=int, choices=(13, 31), default=[13, 31]
-    )
-    parser.add_argument(
-        "--reference-repo", type=Path, default=ROOT.parent / "chipforge_gt2n"
-    )
-    parser.add_argument(
-        "--verify",
-        action="store_true",
-        help="Compare cell/array DRC and LVS with the reference",
-    )
-    parser.add_argument(
-        "--spice",
-        action="store_true",
-        help="Also run Xyce on the LVS-matched schematic; implies --verify",
     )
     args = parser.parse_args(argv)
     output = args.output_dir.resolve()
@@ -262,14 +134,6 @@ def main(argv=None):
             )
             (directory / "cpcell.cdl").write_text(schematic(width))
             report["cells"][f"w{width}"] = {"gds": str(directory / "cpcell.gds")}
-        if args.verify or args.spice:
-            verify(
-                output,
-                list(dict.fromkeys(args.widths)),
-                args.reference_repo.resolve(),
-                args.spice,
-                report,
-            )
         report["status"] = "passed"
     except Exception as exc:
         report["status"] = "failed"

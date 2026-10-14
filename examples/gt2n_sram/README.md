@@ -1,7 +1,7 @@
 # Reproduce the GT2N standard-cell 6T with CPCell
 
 This example reproduces the **210 × 144 nm** standard-row 6T in
-`chipforge_gt2n/scripts/gt2n_sram_bitcell.py`, for the w13/lvt and w31/lvt flavors.
+`chipforge_gt2n.cells.sram_bitcell`, for the w13/lvt and w31/lvt flavors.
 It fixes the six transistor positions/orientations and the external ports, then
 lets CP-SAT find the routes. No reference routing segments or reference cell
 polygons are injected into the generated layout. The resulting cross-coupling
@@ -33,7 +33,7 @@ Outputs default to `build/gt2n_sram_reference/`:
 - `solve.log`: solver output (the constrained reference case reaches OPTIMAL).
 - `w13/cpcell.gds`, `w31/cpcell.gds`: physical GT2N layouts.
 - `w13/cpcell.cdl`, `w31/cpcell.cdl`: corresponding physically sized schematics.
-- `report.json`: generation status and input hashes. Without `--verify`, external
+- `report.json`: generation status and input hashes. Before downstream verification, external
   validation is explicitly reported as `not_run`.
 
 Use `--output-dir PATH` for a separate run or `--widths 31` for one flavor.
@@ -43,21 +43,17 @@ requested **13 or 31 nm sheet width**, with 14 nm gate length.
 
 ## DRC, LVS and SPICE
 
-Use a Python environment containing both projects' dependencies. The sibling
-repository's environment works in this workspace:
+Generate the fixture here, then run its maintained evaluator from the
+`chipforge_gt2n` checkout with that project's environment:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 \
-../chipforge_gt2n/.venv/bin/python examples/gt2n_sram/reproduce.py \
-  --reference-repo ../chipforge_gt2n --spice
+uv run python -m evals.cpcell_reference sram \
+  --output-dir ../CPCellUCSD/build/gt2n_sram_reference --spice
 ```
 
-`--verify` runs DRC/LVS only; `--spice` includes verification and Xyce nominal
-hold/read/write characterization. KLayout, Xyce, and the GT2N PDK must be
-available through the reference project's existing discovery mechanisms
-(`GT2N_ROOT`, `XYCE`, etc.). Xyce's MPI runtime needs local process/socket access.
-All generated artifacts stay under `--output-dir`; the reference repository is
-read-only input.
+Omit `--spice` for DRC/LVS only. PDK discovery uses `GT2N_ROOT` or
+`--pdk-root`. Verification updates the existing report alongside the generated
+artifacts; it does not regenerate or copy reference geometry into the cell.
 
 Verification generates the hand-drawn reference in a separate GDS. It imports
 the **CPCell-generated** cell into the reference's mirrored **3 × 4** array
@@ -66,8 +62,10 @@ single cells and arrays. LVS compares against the reference generator's CDL,
 independently of the CPCell input. The report records source-file hashes,
 individual DRC counts and LVS statuses; a mismatch makes the command fail.
 
-For both w13/lvt and w31/lvt, the reproduced cells and arrays pass LVS. DRC
-findings exactly match the hand-drawn references:
+In the recorded runs with the original verification deck, both w13/lvt and
+w31/lvt cells and arrays passed LVS. DRC findings matched the hand-drawn
+references below. New runs use the downstream project's current deck and
+record its current findings.
 
 | Scope | GATE.2 | SDCON.ACT.1 | Other findings |
 | --- | ---: | ---: | ---: |

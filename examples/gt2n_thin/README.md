@@ -1,7 +1,7 @@
 # Reproduce the GT2N thin 6T with CPCell
 
 This example reproduces the **backside-powered** thin 6T reference in
-`chipforge_gt2n/scripts/gt2n_thin_bitcell.py`. CPCell builds the devices from the
+`chipforge_gt2n.cells.thin_bitcell`. CPCell builds the devices from the
 CDL and fixed placement, derives the shared gate/diffusion conductors, and uses
 CP-SAT to select contact sites and M0/M1 routes. Generation is independent of
 the reference repository; its generator supplies comparison layouts and the
@@ -69,7 +69,7 @@ Outputs default to `build/gt2n_thin_reference/`:
 - `<variant>/cpcell.gds`: native GT2N layers, 0.5 nm DBU, boundary and pin markers.
 - `<variant>/cpcell.cdl`: physically sized schematic from the input devices.
 - `report.json`: generation/verification status, input hashes, and per-variant
-  results. Verification is explicitly `not_run` without `--verify`/`--spice`.
+  results. Verification is explicitly `not_run` until the downstream evaluator runs.
 
 The CDL input uses CPCell's abstract two-fin width (46 nm) for one solver device
 per transistor. Physical sheet widths are selected independently for N and P.
@@ -88,19 +88,17 @@ This JSON uses format `cpcell.fixed_bands.v1`; it is not a single-height `.res`.
 
 ## DRC, LVS and SPICE
 
-Use an environment containing both projects' dependencies, plus KLayout, the
-GT2N PDK, and Xyce. In this workspace:
+Generate the fixture here, then run its maintained evaluator from the
+`chipforge_gt2n` checkout with that project's environment:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 \
-../chipforge_gt2n/.venv/bin/python examples/gt2n_thin/reproduce.py \
-  --reference-repo ../chipforge_gt2n --spice
+uv run python -m evals.cpcell_reference thin \
+  --output-dir ../CPCellUCSD/build/gt2n_thin_reference --spice
 ```
 
-`--verify` runs DRC/LVS alone; `--spice` also runs nominal hold/read/write checks.
-Discovery uses the reference project's mechanisms (`GT2N_ROOT`, `XYCE`, etc.).
-Xyce's MPI runtime needs local daemon/socket access. Outputs stay in the chosen
-output directory; the sibling repository is read-only input.
+Omit `--spice` for DRC/LVS only. PDK discovery uses `GT2N_ROOT` or
+`--pdk-root`. Verification updates the existing report alongside the generated
+artifacts; it does not regenerate or copy reference geometry into the cell.
 
 Verification checks the CPCell cell against its own physical-size CDL and the
 independent reference CDL. It tiles the **actual CPCell GDS cell** in a mirrored
@@ -109,8 +107,10 @@ flattened because shared diffusion merges across instances. DRC runs the full
 platform deck and requires exact rule-count parity with the reference, for
 both the cell and array. Detailed reports and reference source hashes are saved.
 
-All three default variants route to **OPTIMAL**, pass cell/array LVS, and match
-these reference DRC counts:
+In the recorded runs with the original verification deck, all three default
+variants routed to **OPTIMAL**, passed cell/array LVS, and matched the reference
+DRC counts below. New runs use the downstream project's current deck and
+record its current findings.
 
 | Scope | GATE.2 | ACT.2 | ACT.6 | SDCON.ACT.1 |
 | --- | ---: | ---: | ---: | ---: |

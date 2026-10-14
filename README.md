@@ -69,6 +69,9 @@ or relative `--output_dir` paths and create their output directories as needed.
 Wrappers can pass a new output path directly; no pre-created `config/`,
 `result/`, `constraint/`, or `view/` directories are required. For Make, set
 `OUT_DIR=/absolute/path/to/run` to use the same location across stages.
+Default pin-name tables are included in the installed package. Local
+`input/pin_input_collection.json` and `input/pin_output_collection.json` files
+override those defaults when present.
 
 ### GT2N GDS export
 
@@ -237,7 +240,15 @@ options in its generated cell JSON:
 ```
 
 Counts refer to the fingers produced by netlist parsing, including `nfin`
-splitting. Automatic canvas sizing uses the larger row and adds the usual
+splitting and integer `m` multiplicity. The two-fin solver requires positive,
+even `nfin` values; odd counts are rejected rather than rounded. `m` expands
+parallel devices, while `nf` and `par` currently support only 1 (or omission);
+expand other values explicitly before importing. Model polarity is resolved
+from unambiguous `nmos`/`nfet` or `pmos`/`pfet` tokens, case-insensitively.
+Custom names can use `Circuit(model_map={"my_model": "nmos"})` or the same
+`model_map` argument to `read_cdl_file`; unknown or ambiguous names are rejected.
+
+Automatic canvas sizing uses the larger row and adds the usual
 `insert_num_db` allowance. The smaller row can leave columns empty without
 inserting extra transistors. Here “unequal rows” means different device counts,
 not different row heights or a multi-height layout.
@@ -285,11 +296,20 @@ The n31/p31, n13/p13, and n31/p13 variants reproduce 84 × 292/288 nm footprints
 pass cell/array LVS and nominal SPICE checks, and match reference DRC findings.
 Run `.venv/bin/python examples/gt2n_thin/reproduce.py` to generate them.
 
-The [GT2N logic extension](examples/gt2n_logic/README.md) generates NAND4,
-NOR4, AOI221 and OAI221 with automatic placement/routing in a 144 nm row.
-It exports GDS, CDL, LEF and Verilog; `--spice` adds nominal schematic-only
-Liberty characterization after cell and mirrored-abutment DRC/LVS checks.
-Run `.venv/bin/python examples/gt2n_logic/reproduce.py` to generate the batch.
+The [GT2N NAND4 example](examples/gt2n_logic/README.md) demonstrates automatic
+placement/routing in a 144 nm row and W13/W31 export from a shared solution.
+Run `.venv/bin/python examples/gt2n_logic/reproduce.py --widths 31 13`; results
+go to `build/gt2n_nand4/`.
+
+The maintained eighteen-cell catalog, library assembly, characterization and
+external verification flows live in
+[`chipforge_gt2n`](../chipforge_gt2n/docs/cpcell_flows.md). That project depends
+on the installed `cpcell` package. CPCell retains standalone generation examples
+and solver/export regression tests; its normal tests need no GT2N PDK, Xyce,
+or neighboring checkout. See each example's README for downstream verification
+commands. Previously generated snapshots and their recorded provenance remain
+at their original paths.
+
 
 
 ---

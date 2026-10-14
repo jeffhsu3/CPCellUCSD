@@ -1,0 +1,10 @@
+.SUBCKT NAND4 A B C D Y VDD VSS
+MN0 Y A N1 VSS nmos w=46n l=14n nfin=2
+MN1 N1 B N2 VSS nmos w=46n l=14n nfin=2
+MN2 N2 C N3 VSS nmos w=46n l=14n nfin=2
+MN3 N3 D VSS VSS nmos w=46n l=14n nfin=2
+MP0 Y A VDD VDD pmos w=46n l=14n nfin=2
+MP1 Y B VDD VDD pmos w=46n l=14n nfin=2
+MP2 Y C VDD VDD pmos w=46n l=14n nfin=2
+MP3 Y D VDD VDD pmos w=46n l=14n nfin=2
+.ENDS NAND4

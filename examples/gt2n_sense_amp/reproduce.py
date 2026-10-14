@@ -1,10 +1,9 @@
-"""Generate a matched GT2N sense amplifier, optionally run external LVS/DRC/SPICE."""
+"""Generate a matched GT2N sense amplifier using only CPCell."""
 
 import argparse
 import hashlib
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,13 +18,6 @@ def main(argv=None):
         "--output-dir", type=Path, default=ROOT / "build/gt2n_sense_amp"
     )
     parser.add_argument("--timeout", type=float, default=60)
-    parser.add_argument("--verify", action="store_true")
-    parser.add_argument("--spice", action="store_true")
-    parser.add_argument(
-        "--reference-repo", type=Path, default=ROOT.parent / "chipforge_gt2n"
-    )
-    parser.add_argument("--reference-python", type=Path)
-    parser.add_argument("--pdk-root", type=Path, default=ROOT.parent / "GT2N")
     args = parser.parse_args(argv)
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -58,26 +50,6 @@ def main(argv=None):
             matched_devices=problem.design["matched_devices"],
             route_metrics=solution["route_metrics"],
         )
-        if args.verify or args.spice:
-            python = args.reference_python or args.reference_repo / ".venv/bin/python"
-            # Preserve the virtualenv interpreter path; resolving its symlink
-            # selects the base interpreter and loses the reference dependencies.
-            command = [
-                str(python.absolute()),
-                str(Path(__file__).with_name("verify.py")),
-                "--output-dir",
-                str(out),
-                "--reference-repo",
-                str(args.reference_repo.resolve()),
-                "--pdk-root",
-                str(args.pdk_root.resolve()),
-            ]
-            if args.spice:
-                command.append("--spice")
-            subprocess.run(command, check=True, timeout=300)
-            report["verification_status"] = "passed"
-            if args.spice:
-                report["spice_status"] = "passed_schematic_only"
         report["status"] = "passed"
         source = [
             "cpcell/core/band_router.py",
@@ -86,7 +58,6 @@ def main(argv=None):
             "cpcell/gds/gds_GT2N_sense_amp.py",
             "cpcell/gds/gds_GT2N_SH.py",
             "examples/gt2n_sense_amp/reproduce.py",
-            "examples/gt2n_sense_amp/verify.py",
         ]
         report["source_sha256"] = {
             f: hashlib.sha256((ROOT / f).read_bytes()).hexdigest() for f in source

@@ -1,6 +1,6 @@
 """Reproduce the reference footprint/ports through the actual CPCell solver.
 
-External DRC/LVS and Xyce checks are exposed by the example's --spice command;
+External DRC/LVS and Xyce checks live in chipforge_gt2n/evals/cpcell_reference.py;
 these regressions require only this repository's Python dependencies.
 """
 
