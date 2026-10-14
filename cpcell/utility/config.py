@@ -1,6 +1,7 @@
 import json
 import copy
 import argparse
+from importlib.resources import files
 from pathlib import Path
 
 """
@@ -17,11 +18,15 @@ def init():
     GND_NET_NAMES= ['VSS']
     INPUT_NET_NAMES = []
     OUTPUT_NET_NAMES = []
-    # read the pin names from the json files
-    with open("./input/pin_input_collection.json") as f:
+    # Preserve local input/ overrides; installed callers use packaged defaults.
+    def pin_table(name):
+        local = Path("input") / name
+        return local if local.is_file() else files("cpcell.utility").joinpath(name)
+
+    with pin_table("pin_input_collection.json").open() as f:
         data = json.load(f)
         INPUT_NET_NAMES = data.keys()
-    with open("./input/pin_output_collection.json") as f:
+    with pin_table("pin_output_collection.json").open() as f:
         data = json.load(f)
         OUTPUT_NET_NAMES = data.keys()
 
