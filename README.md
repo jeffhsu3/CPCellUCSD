@@ -157,10 +157,12 @@ solve proved optimality.
 
 The result includes solutions, termination reason, a count lower bound, and
 an exact count only when the search exhausts the capped model. Limited runs
-are not uniform samples. Different edge selections can describe the same
-merged geometry; technology-specific experiments should deduplicate those
-and run their physical verification separately. Each net's selection is a
-tree, so redundant loops never inflate the count.
+are not uniform samples. Each net's selection is a tree, so redundant loops
+never inflate the count. Different edge selections can still draw the same
+merged metal; pass `distinct_geometry=True` to keep one solution per
+`merged_geometry()` layout (the cheapest under `by_cost`), with
+`selections_seen` counting every selection found. Physical verification
+remains separate.
 
 ---
 

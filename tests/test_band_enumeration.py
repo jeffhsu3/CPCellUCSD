@@ -3,7 +3,7 @@
 import pytest
 from ortools.sat.python import cp_model
 
-from cpcell.core.band_router import BandRouter, RouteEdge, Shape
+from cpcell.core.band_router import BandRouter, RouteEdge, Shape, merge_boxes
 
 
 def alternatives():
@@ -29,6 +29,67 @@ def attached_loop():
         {"a": [sink]},
         spacing={},
     )
+
+
+def same_metal_twice():
+    """Two selections draw one M0 bar (split vs whole); a third is elsewhere."""
+    root, mid, sink = ("T", "root"), (1, 5, 0), (1, 10, 0)
+
+    def edge(u, v, box, cost):
+        return RouteEdge(u, v, (Shape("M0", box),), cost)
+
+    return BandRouter(
+        [
+            edge(root, mid, (0, 0, 6, 2), 1),
+            edge(mid, sink, (4, 0, 10, 2), 1),
+            edge(root, sink, (0, 0, 10, 2), 3),
+            edge(root, sink, (0, 4, 10, 6), 4),
+        ],
+        {"a": [root]},
+        {"a": [sink]},
+        spacing={},
+    )
+
+
+@pytest.mark.parametrize(
+    "boxes",
+    [
+        [(0, 0, 10, 2)],
+        [(0, 0, 5, 2), (5, 0, 10, 2)],
+        [(4, 0, 10, 2), (0, 0, 6, 2)],
+        [(0, 0, 10, 1), (0, 1, 10, 2)],
+        [(0, 0, 10, 2), (2, 0, 8, 2), (0, 0, 10, 2)],
+    ],
+)
+def test_merge_boxes_is_canonical_for_one_bar(boxes):
+    assert merge_boxes(boxes) == ((0, 0, 10, 2),)
+
+
+def test_merge_boxes_l_shape_is_order_independent():
+    a = merge_boxes([(0, 0, 10, 2), (0, 0, 2, 10)])
+    b = merge_boxes([(0, 2, 2, 10), (0, 0, 2, 2), (2, 0, 10, 2)])
+    assert a == b == ((0, 0, 10, 2), (0, 2, 2, 10))
+    assert merge_boxes([(0, 0, 2, 2), (4, 0, 6, 2)]) == ((0, 0, 2, 2), (4, 0, 6, 2))
+
+
+def test_distinct_geometry_collapses_equivalent_selections():
+    plain = same_metal_twice().enumerate_routes(seconds=5)
+    assert plain["exact_count"] == 3 and plain["selections_seen"] == 3
+    result = same_metal_twice().enumerate_routes(
+        distinct_geometry=True, by_cost=True, seconds=5
+    )
+    assert result["complete"] and result["exact_count"] == 2
+    assert result["selections_seen"] == 3 and result["distinct_geometry"]
+    # The cheapest drawing of the shared bar is the one kept.
+    assert [s["objective"] for s in result["solutions"]] == [2, 4]
+
+
+def test_merged_geometry_keeps_nets_and_layers_apart():
+    router = same_metal_twice()
+    split = router.merged_geometry([{"net": "a", "edge": 0}, {"net": "a", "edge": 1}])
+    assert split == router.merged_geometry([{"net": "a", "edge": 2}])
+    assert split == (("a", "M0", ((0, 0, 10, 2),)),)
+    assert split != router.merged_geometry([{"net": "a", "edge": 3}])
 
 
 def test_counts_route_selections_once_despite_multiple_flow_witnesses():
@@ -122,6 +183,7 @@ def test_unknown_is_not_an_exact_zero_count(monkeypatch):
         {"max_cost": 1.2},
         {"by_cost": 1},
         {"by_cost": None},
+        {"distinct_geometry": 1},
     ],
 )
 def test_invalid_budgets_rejected(kwargs):

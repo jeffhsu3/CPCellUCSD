@@ -44,6 +44,28 @@ def close_boxes(a, b, spacing):
     return (dx <= 0 and dy <= 0) or (dx < spacing and dy < spacing)
 
 
+def merge_boxes(boxes):
+    """Union of rectangles as maximal horizontal strips, a canonical form."""
+    xs = sorted({x for b in boxes for x in (b[0], b[2])})
+    ys = sorted({y for b in boxes for y in (b[1], b[3])})
+    rows = []
+    for y0, y1 in zip(ys, ys[1:]):
+        spans = []
+        for x0, x1 in zip(xs, xs[1:]):
+            if any(
+                b[0] <= x0 and x1 <= b[2] and b[1] <= y0 and y1 <= b[3] for b in boxes
+            ):
+                if spans and spans[-1][1] == x0:
+                    spans[-1] = (spans[-1][0], x1)
+                else:
+                    spans.append((x0, x1))
+        if rows and rows[-1][2] == spans:
+            rows[-1][1] = y1
+        else:
+            rows.append([y0, y1, spans])
+    return tuple((x0, y0, x1, y1) for y0, y1, spans in rows for x0, x1 in spans)
+
+
 class BandRouter:
     def __init__(self, edges, terminals, ports, spacing=None, *, matching=None):
         self.edges = list(edges)
@@ -265,7 +287,13 @@ class BandRouter:
         return result
 
     def enumerate_routes(
-        self, *, max_solutions=32, seconds=30, max_cost=None, by_cost=False
+        self,
+        *,
+        max_solutions=32,
+        seconds=30,
+        max_cost=None,
+        by_cost=False,
+        distinct_geometry=False,
     ):
         """Enumerate distinct net/edge selections, ignoring auxiliary flows.
 
@@ -280,6 +308,11 @@ class BandRouter:
         solve that times out before proving optimality is kept as FEASIBLE
         and ends the enumeration: it costs no less than earlier solutions but
         may not be the next cheapest, so cost_ordered is then False.
+
+        With distinct_geometry, selections whose merged_geometry() matches an
+        earlier solution are skipped, so solutions and counts are distinct
+        physical layouts; selections_seen still counts every selection found.
+        The first selection of each layout is kept, the cheapest under by_cost.
         """
         if type(max_solutions) is not int or max_solutions < 1:
             raise ValueError("max_solutions must be a positive integer")
@@ -289,6 +322,8 @@ class BandRouter:
             raise ValueError("max_cost must be a nonnegative integer or None")
         if type(by_cost) is not bool:
             raise ValueError("by_cost must be a bool")
+        if type(distinct_geometry) is not bool:
+            raise ValueError("distinct_geometry must be a bool")
         started = time.monotonic()
         model = self.model.Clone()
         if not by_cost:
@@ -305,7 +340,7 @@ class BandRouter:
         solver = cp_model.CpSolver()
         solver.parameters.num_search_workers = 1
         solver.parameters.random_seed = 32
-        solutions = []
+        solutions, seen_geometry, selections_seen = [], set(), 0
         termination, last_status = "solution_limit", None
         while len(solutions) < max_solutions:
             remaining = seconds - (time.monotonic() - started)
@@ -328,17 +363,22 @@ class BandRouter:
             chosen = {key for key, var in used.items() if solver.Value(var)}
             routes = [{"net": net, "edge": i} for net, i in sorted(chosen)]
             self.validate(routes)
+            selections_seen += 1
             # Without an objective, OPTIMAL would not establish minimum routing
             # cost. With one, it means cheapest among the unblocked selections.
             proven = by_cost and status == cp_model.OPTIMAL
-            solutions.append(
-                {
-                    "status": "OPTIMAL" if proven else "FEASIBLE",
-                    "objective": sum(self.edges[i].cost for _, i in chosen),
-                    "routes": routes,
-                    "route_metrics": self.route_metrics(routes),
-                }
-            )
+            geometry = self.merged_geometry(routes) if distinct_geometry else None
+            if geometry is None or geometry not in seen_geometry:
+                if geometry is not None:
+                    seen_geometry.add(geometry)
+                solutions.append(
+                    {
+                        "status": "OPTIMAL" if proven else "FEASIBLE",
+                        "objective": sum(self.edges[i].cost for _, i in chosen),
+                        "routes": routes,
+                        "route_metrics": self.route_metrics(routes),
+                    }
+                )
             if by_cost and not proven:
                 termination = "time_limit"
                 break
@@ -356,8 +396,26 @@ class BandRouter:
             "complete": complete,
             "count_lower_bound": len(solutions),
             "exact_count": len(solutions) if complete else None,
+            "distinct_geometry": distinct_geometry,
+            "selections_seen": selections_seen,
             "wall_time": time.monotonic() - started,
         }
+
+    def merged_geometry(self, routes):
+        """Canonical merged conductor shapes per net and layer.
+
+        Each layer's union is returned as maximal horizontal strips, so
+        selections that draw the same metal compare equal however their
+        edges split or overlap it. Returns a hashable, sorted tuple.
+        """
+        boxes = {}
+        for route in routes:
+            for shape in self.edges[route["edge"]].shapes:
+                boxes.setdefault((route["net"], shape.layer), []).append(shape.box)
+        return tuple(
+            (net, layer, merge_boxes(found))
+            for (net, layer), found in sorted(boxes.items(), key=repr)
+        )
 
     def solve_result(self, seconds=30):
         """Return FEASIBLE/OPTIMAL, INFEASIBLE, or UNKNOWN without conflating them.
