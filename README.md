@@ -143,6 +143,25 @@ python -m unittest discover -s tests -v
 |:--|:--|
 | `make viewcell` | Generate a `.png` canvas visualization with placement, routing, and net labels |
 | `make check_duplicate_vars` | Detect accidental duplicate Boolean variable names in CP-SAT |
+
+### Explore fixed-band routes
+
+`BandRouter.enumerate_routes(max_cost=2288, max_solutions=32, seconds=30)`
+returns distinct net/edge selections under an absolute routing-cost cap.
+It clones the model, preserves caller constraints, and blocks only route
+choices, so auxiliary flow assignments cannot multiply the count.
+The time budget covers all enumeration solves together.
+Pass `by_cost=True` to keep the routing objective and get the k cheapest
+selections in nondecreasing cost; `cost_ordered` reports whether every
+solve proved optimality.
+
+The result includes solutions, termination reason, a count lower bound, and
+an exact count only when the search exhausts the capped model. Limited runs
+are not uniform samples. Different edge selections can describe the same
+merged geometry; technology-specific experiments should deduplicate those
+and run their physical verification separately. Each net's selection is a
+tree, so redundant loops never inflate the count.
+
 ---
 
 ## Workflow Overview

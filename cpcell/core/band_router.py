@@ -8,6 +8,7 @@ All geometry uses integer half-nanometre units. No routed wires are prescribed.
 from dataclasses import dataclass
 from itertools import combinations
 import math
+import time
 
 import networkx as nx
 from ortools.sat.python import cp_model
@@ -230,6 +231,12 @@ class BandRouter:
             self.model.Add(
                 sum(reach_in.get(node, [])) - sum(reach_out.get(node, [])) == demand
             )
+        # Reachability makes the selection connected; one edge per reached
+        # node then makes it a tree, so attached loops cannot pad routes either.
+        self.model.Add(
+            sum(var for (owner, _), var in self.used.items() if owner == net)
+            == sum(active.values())
+        )
 
     def _geometry_constraints(self):
         # End extensions and via landings participate in conflicts, even when
@@ -256,6 +263,101 @@ class BandRouter:
         if result["status"] not in ("OPTIMAL", "FEASIBLE"):
             raise ValueError(f"Fixed-band routing failed: {result['status']}")
         return result
+
+    def enumerate_routes(
+        self, *, max_solutions=32, seconds=30, max_cost=None, by_cost=False
+    ):
+        """Enumerate distinct net/edge selections, ignoring auxiliary flows.
+
+        The cost cap is absolute, in the same units as the routing objective.
+        The original model (including caller constraints) is left unchanged.
+        A single time budget covers all solves. Only an exhausted search gives
+        an exact count; a limit or timeout gives a lower bound. Selections are
+        neither uniform samples nor equivalence classes of merged geometry.
+
+        With by_cost, each solve keeps the routing objective, so solutions
+        arrive in nondecreasing cost (k-best); ties are in solver order. A
+        solve that times out before proving optimality is kept as FEASIBLE
+        and ends the enumeration: it costs no less than earlier solutions but
+        may not be the next cheapest, so cost_ordered is then False.
+        """
+        if type(max_solutions) is not int or max_solutions < 1:
+            raise ValueError("max_solutions must be a positive integer")
+        if isinstance(seconds, bool) or not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("Solver timeout must be finite and positive")
+        if max_cost is not None and (type(max_cost) is not int or max_cost < 0):
+            raise ValueError("max_cost must be a nonnegative integer or None")
+        if type(by_cost) is not bool:
+            raise ValueError("by_cost must be a bool")
+        started = time.monotonic()
+        model = self.model.Clone()
+        if not by_cost:
+            model.ClearObjective()
+        used = {
+            key: model.GetBoolVarFromProtoIndex(var.Index())
+            for key, var in self.used.items()
+        }
+        if max_cost is not None:
+            model.Add(
+                sum(self.edges[i].cost * var for (_, i), var in used.items())
+                <= max_cost
+            )
+        solver = cp_model.CpSolver()
+        solver.parameters.num_search_workers = 1
+        solver.parameters.random_seed = 32
+        solutions = []
+        termination, last_status = "solution_limit", None
+        while len(solutions) < max_solutions:
+            remaining = seconds - (time.monotonic() - started)
+            if remaining <= 0:
+                termination = "time_limit"
+                break
+            solver.parameters.max_time_in_seconds = remaining
+            status = solver.Solve(model)
+            last_status = solver.StatusName(status)
+            if status == cp_model.MODEL_INVALID:
+                raise ValueError(f"Invalid routing model: {solver.ResponseStats()}")
+            if status == cp_model.INFEASIBLE:
+                termination = "exhausted"
+                break
+            if status == cp_model.UNKNOWN:
+                termination = "time_limit"
+                break
+            if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                raise RuntimeError(f"Unexpected routing solver status: {last_status}")
+            chosen = {key for key, var in used.items() if solver.Value(var)}
+            routes = [{"net": net, "edge": i} for net, i in sorted(chosen)]
+            self.validate(routes)
+            # Without an objective, OPTIMAL would not establish minimum routing
+            # cost. With one, it means cheapest among the unblocked selections.
+            proven = by_cost and status == cp_model.OPTIMAL
+            solutions.append(
+                {
+                    "status": "OPTIMAL" if proven else "FEASIBLE",
+                    "objective": sum(self.edges[i].cost for _, i in chosen),
+                    "routes": routes,
+                    "route_metrics": self.route_metrics(routes),
+                }
+            )
+            if by_cost and not proven:
+                termination = "time_limit"
+                break
+            model.AddBoolOr(
+                [var.Not() if key in chosen else var for key, var in used.items()]
+            )
+        complete = termination == "exhausted"
+        return {
+            "solutions": solutions,
+            "max_cost": max_cost,
+            "cost_ordered": by_cost
+            and all(s["status"] == "OPTIMAL" for s in solutions),
+            "termination": termination,
+            "last_solver_status": last_status,
+            "complete": complete,
+            "count_lower_bound": len(solutions),
+            "exact_count": len(solutions) if complete else None,
+            "wall_time": time.monotonic() - started,
+        }
 
     def solve_result(self, seconds=30):
         """Return FEASIBLE/OPTIMAL, INFEASIBLE, or UNKNOWN without conflating them.
@@ -319,6 +421,9 @@ class BandRouter:
             required = set(self.terminals[net]) | set(self.ports.get(net, []))
             if not required <= set(graph) or not nx.is_connected(graph):
                 raise ValueError(f"Disconnected route for {net}")
+            # Count chosen edges, not graph edges: parallel edges collapse in nx.Graph.
+            if len(chosen[net]) != graph.number_of_nodes() - 1:
+                raise ValueError(f"Route for {net} contains a loop")
             if any(graph.degree(node) != 1 for node in self.terminals[net]):
                 raise ValueError(f"Conductor {net} must use exactly one contact")
         for net, other in combinations(self.nets, 2):
