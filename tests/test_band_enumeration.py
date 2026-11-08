@@ -136,10 +136,23 @@ def test_attached_loops_are_not_counted():
     assert attached_loop().enumerate_routes(max_cost=4, seconds=5)["exact_count"] == 1
 
 
-def test_validate_rejects_attached_loop():
+def test_only_tree_validation_rejects_attached_loop():
+    # Plain validate() accepts a redundant loop, as in routes solved and
+    # cached before enumeration; enumeration validates with tree=True.
     router = attached_loop()
+    loop = [{"net": "a", "edge": i} for i in range(5)]
+    router.validate(loop)
     with pytest.raises(ValueError, match="loop"):
-        router.validate([{"net": "a", "edge": i} for i in range(5)])
+        router.validate(loop, tree=True)
+
+
+def test_tree_constraint_stays_out_of_the_solve_model():
+    router = attached_loop()
+    before = str(router.model.Proto())
+    router.enumerate_routes(seconds=5)
+    assert str(router.model.Proto()) == before
+    # Loops still cost more, so solve() finds the same minimal path.
+    assert len(router.solve()["routes"]) == 2
 
 
 @pytest.mark.parametrize("make", [alternatives, attached_loop])

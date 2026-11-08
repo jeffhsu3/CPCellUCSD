@@ -157,8 +157,9 @@ solve proved optimality.
 
 The result includes solutions, termination reason, a count lower bound, and
 an exact count only when the search exhausts the capped model. Limited runs
-are not uniform samples. Each net's selection is a tree, so redundant loops
-never inflate the count. Different edge selections can still draw the same
+are not uniform samples. Each enumerated net's selection is a tree, so
+redundant loops never inflate the count; `solve()` and plain `validate()`
+still accept such loops (`validate(routes, tree=True)` rejects them). Different edge selections can still draw the same
 merged metal; pass `distinct_geometry=True` to keep one solution per
 `merged_geometry()` layout (the cheapest under `by_cost`), with
 `selections_seen` counting every selection found. Physical verification

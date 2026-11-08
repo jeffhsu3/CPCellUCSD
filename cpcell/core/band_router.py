@@ -80,6 +80,7 @@ class BandRouter:
         self.model = cp_model.CpModel()
         self.used = {}
         self.node_usage = {}
+        self.reached = {}
         for net in self.nets:
             self._net_constraints(net)
         for usage in self.node_usage.values():
@@ -253,12 +254,10 @@ class BandRouter:
             self.model.Add(
                 sum(reach_in.get(node, [])) - sum(reach_out.get(node, [])) == demand
             )
-        # Reachability makes the selection connected; one edge per reached
-        # node then makes it a tree, so attached loops cannot pad routes either.
-        self.model.Add(
-            sum(var for (owner, _), var in self.used.items() if owner == net)
-            == sum(active.values())
-        )
+        # Kept for enumerate_routes, which adds the tree constraint to its own
+        # copy of the model. solve() leaves redundant loops allowed, so routes
+        # solved and cached before enumeration existed still validate.
+        self.reached[net] = list(active.values())
 
     def _geometry_constraints(self):
         # End extensions and via landings participate in conflicts, even when
@@ -332,6 +331,13 @@ class BandRouter:
             key: model.GetBoolVarFromProtoIndex(var.Index())
             for key, var in self.used.items()
         }
+        # Reachability makes each selection connected; one edge per reached
+        # node then makes it a tree, so attached loops cannot pad the count.
+        for net, reached in self.reached.items():
+            model.Add(
+                sum(var for (owner, _), var in used.items() if owner == net)
+                == sum(model.GetBoolVarFromProtoIndex(v.Index()) for v in reached)
+            )
         if max_cost is not None:
             model.Add(
                 sum(self.edges[i].cost * var for (_, i), var in used.items())
@@ -362,7 +368,7 @@ class BandRouter:
                 raise RuntimeError(f"Unexpected routing solver status: {last_status}")
             chosen = {key for key, var in used.items() if solver.Value(var)}
             routes = [{"net": net, "edge": i} for net, i in sorted(chosen)]
-            self.validate(routes)
+            self.validate(routes, tree=True)
             selections_seen += 1
             # Without an objective, OPTIMAL would not establish minimum routing
             # cost. With one, it means cheapest among the unblocked selections.
@@ -449,8 +455,11 @@ class BandRouter:
             "route_metrics": self.route_metrics(routes),
         }
 
-    def validate(self, routes):
-        """Independently verify connectivity and geometry before GDS export."""
+    def validate(self, routes, *, tree=False):
+        """Independently verify connectivity and geometry before GDS export.
+
+        With tree, also reject a net whose selection contains a loop.
+        """
         chosen = {}
         seen = set()
         for route in routes:
@@ -480,7 +489,7 @@ class BandRouter:
             if not required <= set(graph) or not nx.is_connected(graph):
                 raise ValueError(f"Disconnected route for {net}")
             # Count chosen edges, not graph edges: parallel edges collapse in nx.Graph.
-            if len(chosen[net]) != graph.number_of_nodes() - 1:
+            if tree and len(chosen[net]) != graph.number_of_nodes() - 1:
                 raise ValueError(f"Route for {net} contains a loop")
             if any(graph.degree(node) != 1 for node in self.terminals[net]):
                 raise ValueError(f"Conductor {net} must use exactly one contact")
