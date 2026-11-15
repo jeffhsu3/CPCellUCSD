@@ -107,7 +107,16 @@ class ThinProblem:
         self._grid()
         self._access()
         self.ports = self._ports()
-        self.router = BandRouter(self.edges, dict(self.terminals), self.ports)
+        self.router = BandRouter(
+            self.edges,
+            dict(self.terminals),
+            self.ports,
+            spacing={
+                "M0": dict(horizontal=34, vertical=24, corner=30),
+                "M1": dict(horizontal=28, vertical=40, corner=32),
+                "V0": 28,
+            },
+        )
 
     @property
     def name(self):
@@ -266,7 +275,10 @@ class ThinProblem:
                 via = db.Box(x - half, y - 12, x + half, y + 12)
                 if not (db.Region(via) - conductor).is_empty():
                     continue
-                if layer == "VG" and not (db.Region(via).sized(0, 12) & act).is_empty():
+                if (
+                    layer == "VG"
+                    and not (db.Region(via).sized(0, 12, 2) & act).is_empty()
+                ):
                     continue
                 shapes = (
                     Shape(layer, (via.left, via.bottom, via.right, via.top)),

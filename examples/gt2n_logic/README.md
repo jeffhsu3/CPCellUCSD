@@ -17,6 +17,19 @@ The output includes `result/NAND4.res`, the config, solve log, per-width GDS
 and physical CDL, and `report.json`. Generation does not claim external
 DRC/LVS or electrical qualification.
 
+The example selects `layout_profile="gt2n_logic"` when generating its config.
+The reusable profile supplies the contact/grid/spacing defaults, and the core
+solver enforces legal contact rows and aligned complementary gate nets.
+It no longer depends on example-specific alignment or contact restrictions.
+For other circuits, use
+`generate_config(4, "FinFET", "SH", names, output, layout_profile="gt2n_logic")`
+with this example's `logic.layer`, or the configuration CLI's
+`--layout_profile gt2n_logic`. Existing callers that select the profile in JSON
+also receive its mandatory physical constraints. User placement constraints,
+routing-layer subsets and stricter spacing remain active; incompatible contact
+rows or grids fail early. See the [profile contract](../../docs/constraints.md#gt2n-logic-technology-contract)
+for the exact scope and migration behavior.
+
 The full eighteen-cell catalog, LEF/Verilog/Liberty views, manifests, library
 tests and qualification workflows now live in
 [`chipforge_gt2n`](../../../chipforge_gt2n/docs/cpcell_logic.md), under

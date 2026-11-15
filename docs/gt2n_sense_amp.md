@@ -70,6 +70,16 @@ connectivity, geometry spacing, and matching before writing GDS. The router
 supports separate horizontal, vertical, and Euclidean corner spacing thresholds
 for adapters that need directional metal spacing.
 
+Metal spacing applies to separated rectangles on the same net as well as to
+different nets. Touching or overlapping fragments may join; fragments with a
+small gap are allowed only if selected metal fills the bounding rectangle.
+Several segments can fill that gap, but a connection through another layer
+does not waive spacing. This models straight rectangular tracks, rather than
+general bent polygons. Solver constraints and export validation both enforce
+it. `same_net_spacing` defaults to the `M*` entries of `spacing`; adapters can
+provide an explicit mapping for other layers. Legacy inter-net via/contact
+isolation distances are not implicitly used as same-net cut rules.
+
 ## Verification scope
 
 Physical checks permit the reference platform's known `GATE.2` dummy-gate and

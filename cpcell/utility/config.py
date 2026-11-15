@@ -30,13 +30,17 @@ def init():
         data = json.load(f)
         OUTPUT_NET_NAMES = data.keys()
 
-def generate_config(track, tech, height_config, circuit_names, output_dir):
+def generate_config(track, tech, height_config, circuit_names, output_dir, *, layout_profile="default"):
+    if layout_profile not in ("default", "gt2n_sram", "gt2n_logic"):
+        raise ValueError("Unknown layout_profile")
+    if layout_profile == "gt2n_logic" and (track, tech, height_config) != (4, "FinFET", "SH"):
+        raise ValueError("gt2n_logic requires track=4, tech=FinFET, height_config=SH")
     config_dir = Path(output_dir) / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     # FinFET, SH, 4T
     CONFIG_TEMPLATE = {
         "layout_profile": {
-            "value": "default", "info": "Physical export profile: default, gt2n_sram or gt2n_logic"
+            "value": layout_profile, "info": "Layout profile: default, gt2n_sram or gt2n_logic; gt2n_logic enforces its technology contract in the solver"
         },
         "routing_layers": {
             "value": ["M0", "M1", "M2"], "info": "Metals available to the router"
@@ -197,6 +201,11 @@ def generate_config(track, tech, height_config, circuit_names, output_dir):
         }
     }
 
+    if layout_profile == "gt2n_logic":
+        from cpcell.tech.gt2n_logic import config_defaults
+        for key, value in config_defaults().items():
+            CONFIG_TEMPLATE[key]["value"] = value
+
     for cir in circuit_names:
         config_template = copy.deepcopy(CONFIG_TEMPLATE)
         # ^ (Heuristic) How many diffusion breaks to insert?
@@ -265,6 +274,12 @@ def main(args=None):
         help="Height configuration: SH (Single Height).",
     )
     parser.add_argument(
+        "--layout_profile",
+        default="default",
+        choices=("default", "gt2n_sram", "gt2n_logic"),
+        help="Select technology-specific configuration defaults.",
+    )
+    parser.add_argument(
         "--output_dir",
         default="./output/",
         type=str,
@@ -277,6 +292,7 @@ def main(args=None):
         height_config=parsed_args.height_config,
         circuit_names=parsed_args.cell_names,
         output_dir=parsed_args.output_dir,
+        layout_profile=parsed_args.layout_profile,
     )
 
 

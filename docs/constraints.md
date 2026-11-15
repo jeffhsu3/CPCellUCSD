@@ -138,3 +138,44 @@ paired with the reference grid and changes the GT2N physical export conventions.
 It is preserved as `LAYOUT_PROFILE` in the result's technology section. See the
 [verified 210 × 144 nm 6T example](../examples/gt2n_sram/README.md) for the
 complete configuration and reproduction command.
+
+## GT2N logic technology contract
+
+Generate a logic configuration with
+`generate_config(4, "FinFET", "SH", names, output, layout_profile="gt2n_logic")`,
+or `python -m cpcell.utility.config --layout_profile gt2n_logic --cell_names NAND4`.
+Use the matching [logic layer grid](../examples/gt2n_logic/logic.layer).
+The configuration generator supplies profile defaults for contact rows,
+spacing, via landings, pin access, and one extra diffusion-break column of
+placement capacity. Canvas size, routing layers, and search settings remain
+configurable. Larger or more complex circuits can need more placement space.
+
+Selecting `layout_profile: "gt2n_logic"` also enforces the physical contract in
+the core solver, including callers that construct their own JSON:
+
+- The supported grid has a 42 nm gate pitch, M0/M2 rows at
+  `[16, 42, 72, 102, 128]` nm and M1 columns at 42 nm multiples starting at
+  42 nm. Unsupported grid/width combinations fail before model construction.
+- Gate access is restricted to row 2; diffusion access to rows 0/1/3/4.
+  Omitted restrictions receive these defaults. Explicit restrictions must be
+  nonempty subsets, so tighter access requirements remain hard constraints.
+- Each occupied gate column must contain complementary devices with the same
+  gate net. Repeated input fingers can choose their pairing; explicit alignment,
+  fixed placement and ordering constraints remain active. Netlists without equal
+  N/P finger counts for each gate net are rejected.
+- M1 cannot touch the two outer routing rows or use via-only landings.
+  Mandatory end-spacing minima include the exported wire extensions: doubled-nm
+  center distances M0=82, M1=80, M2=82. M1 also requires at least 16 doubled-nm
+  centerline length, giving 28 nm physical length with its two 10 nm extensions.
+  Caller EOL/MAR values act as additional lower bounds; stricter values survive.
+
+New configurations use conservative routing defaults, including M1 MAR=60.
+Changing only the profile name in an old generic configuration retains its
+existing search and pin restrictions, which can make it unnecessarily
+infeasible; generate a profile-specific configuration to get the intended
+defaults. Configuration preparation copies the input and never edits a reused
+technology object or the source JSON.
+
+This contract covers the supported logic frame. Physical width/VT selection
+still occurs at export, using a uniform sheet width, and external DRC/LVS
+remains necessary.

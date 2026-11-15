@@ -142,6 +142,9 @@ class ConstraintTest(unittest.TestCase):
             for key, value in {'enforce_diffusion_alignment': False, 'insert_num_db': 2, 'num_search_workers': 1}.items():
                 settings[key]['value'] = value
             settings['max_time'] = {'value': True, 'time': 15}
+            # On the legacy grid, W13 gate access clears ACT only on the
+            # inner tracks (physical y=60/84 nm).
+            settings['contact_rows']['value'] = {'gate': [1, 2]}
             settings['boundary_ports']['value'] = [
                 port(name='i_' + side, net='I', side=side, track=1) for side in ('left', 'right')
             ] + [

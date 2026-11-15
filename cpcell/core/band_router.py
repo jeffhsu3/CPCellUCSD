@@ -67,11 +67,32 @@ def merge_boxes(boxes):
 
 
 class BandRouter:
-    def __init__(self, edges, terminals, ports, spacing=None, *, matching=None):
+    def __init__(
+        self,
+        edges,
+        terminals,
+        ports,
+        spacing=None,
+        *,
+        matching=None,
+        same_net_spacing=None,
+    ):
         self.edges = list(edges)
         self.terminals = terminals
         self.ports = ports
         self.spacing = {"M0": 28, "M1": 28, "V0": 28} if spacing is None else spacing
+        # Metal spacing applies regardless of electrical connectivity. Contact
+        # and via rules can differ by direction and net; the legacy inter-net
+        # isolation distances are not automatically rules for same-net cuts.
+        self.same_net_spacing = (
+            {
+                layer: value
+                for layer, value in self.spacing.items()
+                if layer.startswith("M")
+            }
+            if same_net_spacing is None
+            else same_net_spacing
+        )
         self.nets = sorted(terminals)
         if not self.nets or any(not nodes for nodes in terminals.values()):
             raise ValueError("Every routed net needs an intrinsic conductor terminal")
@@ -278,6 +299,93 @@ class BandRouter:
                 for a, b in sorted({(i, j), (j, i)}):
                     if (net, a) in self.used and (other, b) in self.used:
                         self.model.Add(self.used[net, a] + self.used[other, b] <= 1)
+        self._same_net_geometry_constraints()
+
+    @staticmethod
+    def _bounds(a, b):
+        return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+    @staticmethod
+    def _contains(outer, inner):
+        return (
+            outer[0] <= inner[0]
+            and outer[1] <= inner[1]
+            and outer[2] >= inner[2]
+            and outer[3] >= inner[3]
+        )
+
+    def _gap_cover(self, a, b, candidates):
+        """Edge sets covering every empty tile of the pair's bounding box.
+
+        Collinear wire fragments may be joined by several selected segments.
+        Checking each fragment pair without this coverage would reject legal
+        continuous metal. All endpoints partition the box into exact tiles;
+        an unselected segment, or one on another net, cannot fill a tile.
+        """
+        bounds = self._bounds(a, b)
+        clipped = []
+        for i, box in candidates:
+            clip = (
+                max(bounds[0], box[0]),
+                max(bounds[1], box[1]),
+                min(bounds[2], box[2]),
+                min(bounds[3], box[3]),
+            )
+            if clip[0] < clip[2] and clip[1] < clip[3]:
+                clipped.append((i, clip))
+        xs = sorted(
+            {bounds[0], bounds[2]} | {x for _, r in clipped for x in (r[0], r[2])}
+        )
+        ys = sorted(
+            {bounds[1], bounds[3]} | {y for _, r in clipped for y in (r[1], r[3])}
+        )
+        covers = set()
+        for x0, x1 in zip(xs, xs[1:]):
+            for y0, y1 in zip(ys, ys[1:]):
+                tile = (x0, y0, x1, y1)
+                if self._contains(a, tile) or self._contains(b, tile):
+                    continue
+                cover = frozenset(i for i, r in clipped if self._contains(r, tile))
+                if not cover:
+                    return [cover]
+                covers.add(cover)
+        return sorted(covers, key=lambda c: tuple(sorted(c)))
+
+    def _same_net_geometry_constraints(self):
+        """Spacing for separate metal rectangles, including same-net wires.
+
+        Touching/overlapping fragments can join. A too-small gap is allowed
+        only when selected geometry fills the entire bounding rectangle. This
+        models the adapters' straight, rectangular metal tracks; connectivity
+        through another layer never exempts a physical spacing violation.
+        """
+        for layer, spacing in self.same_net_spacing.items():
+            candidates = [
+                (i, s.box)
+                for i, e in enumerate(self.edges)
+                for s in e.shapes
+                if s.layer == layer
+            ]
+            for pos, (i, a) in enumerate(candidates):
+                for j, b in candidates[pos + 1 :]:
+                    if close_boxes(a, b, 0) or not close_boxes(a, b, spacing):
+                        continue
+                    covers = self._gap_cover(a, b, candidates)
+                    for net in self.nets:
+                        if (net, i) not in self.used or (net, j) not in self.used:
+                            continue
+                        for cover in covers:
+                            self.model.AddBoolOr(
+                                [
+                                    self.used[net, i].Not(),
+                                    self.used[net, j].Not(),
+                                    *(
+                                        self.used[net, k]
+                                        for k in sorted(cover)
+                                        if (net, k) in self.used
+                                    ),
+                                ]
+                            )
 
     def solve(self, seconds=30):
         result = self.solve_result(seconds)
@@ -493,6 +601,29 @@ class BandRouter:
                 raise ValueError(f"Route for {net} contains a loop")
             if any(graph.degree(node) != 1 for node in self.terminals[net]):
                 raise ValueError(f"Conductor {net} must use exactly one contact")
+            for layer, spacing in self.same_net_spacing.items():
+                boxes = [
+                    s.box for e in chosen[net] for s in e.shapes if s.layer == layer
+                ]
+                for a, b in combinations(boxes, 2):
+                    if close_boxes(a, b, 0) or not close_boxes(a, b, spacing):
+                        continue
+                    bounds = self._bounds(a, b)
+                    clips = [
+                        (
+                            max(bounds[0], r[0]),
+                            max(bounds[1], r[1]),
+                            min(bounds[2], r[2]),
+                            min(bounds[3], r[3]),
+                        )
+                        for r in boxes
+                    ]
+                    merged = merge_boxes(
+                        [r for r in clips if r[0] < r[2] and r[1] < r[3]]
+                    )
+                    area = sum((r[2] - r[0]) * (r[3] - r[1]) for r in merged)
+                    if area != (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]):
+                        raise ValueError(f"Same-net {layer} spacing violation on {net}")
         for net, other in combinations(self.nets, 2):
             for a in chosen[net]:
                 for b in chosen[other]:

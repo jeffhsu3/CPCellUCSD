@@ -54,7 +54,7 @@ def test_nand4_example_routes_and_exports_both_widths(tmp_path):
         m1 = db.Region(cell.shapes(gds.layer(25, 0))).merged()
         assert m1.bbox().bottom >= 20 and m1.bbox().top <= 268
         contacts = db.Region(cell.shapes(gds.layer(12, 0)))
-        assert (contacts.sized(0, 12) & act).is_empty()
+        assert (contacts.sized(0, 12, 2) & act).is_empty()
         vs = db.Region(cell.shapes(gds.layer(22, 0)))
         assert (vs - m1).is_empty()
         assert (vs - db.Region(cell.shapes(gds.layer(20, 0)))).is_empty()

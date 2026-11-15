@@ -83,7 +83,9 @@ An existing solution can be exported again without solving:
 ```
 
 The exporter rebuilds the candidate graph and independently checks connectivity,
-contact ownership/count, node exclusivity, and inter-net geometry before writing.
+contact ownership/count, node exclusivity, and metal spacing within and between
+nets before writing. M0/M1 use directional edge and corner spacing; selected
+collinear fragments can join into continuous metal without a false gap violation.
 This JSON uses format `cpcell.fixed_bands.v1`; it is not a single-height `.res`.
 
 ## DRC, LVS and SPICE

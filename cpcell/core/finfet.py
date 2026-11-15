@@ -21,6 +21,7 @@ from ortools.sat.python import cp_model
 # custom
 import cpcell.utility.config as config
 from cpcell.tech.tech import FinFET_Tech
+from cpcell.tech import gt2n_logic
 from cpcell.utility.entity import Circuit, LayerStack, Model, PinType
 from cpcell.solve.CPLOG import LoggingCpModel
 from cpcell.solve.graph import LayeredGridGraph
@@ -70,6 +71,8 @@ class FinFET:
         self.fin_tech.layout_profile = self.cell_config.get("layout_profile", {"value": "default"})["value"]
         if self.fin_tech.layout_profile not in ("default", "gt2n_sram", "gt2n_logic"):
             raise ValueError("layout_profile must be default, gt2n_sram or gt2n_logic")
+        if self.fin_tech.layout_profile == "gt2n_logic":
+            self.cell_config = gt2n_logic.prepare_config(self.cell_config, self.fin_tech, circuit)
         p_count = circuit.num_pmos_transistors()
         n_count = circuit.num_nmos_transistors()
         if p_count != n_count:
@@ -128,7 +131,7 @@ class FinFET:
         self._init_tech()
         self._init_CP_domain()  # this is special to CP model
         constraints.read_options(self)
-        if self.placement_constraints or self.boundary_ports:
+        if self.placement_constraints or self.boundary_ports or self.fin_tech.layout_profile == "gt2n_logic":
             # User constraints distinguish placements that legacy symmetry
             # heuristics otherwise consider interchangeable.
             self.use_break_symmetry = False
@@ -749,6 +752,8 @@ class FinFET:
         # ^ enforce that gate cut is continous and is at least X CPP long
         self.gate_share_at_col_vars = OrderedDict()  # ci -> gate_share_vars
         routing.bind_gate_sharing_to_columns(self, db_as_gs=True)
+        if self.fin_tech.layout_profile == "gt2n_logic":
+            gt2n_logic.constrain_gate_columns(self)
 
         # ^ enforce that gate cut is continous and is at least X CPP long
         self.min_gate_cut_len = self.cell_config["minimum_gate_cut_length"]["value"]

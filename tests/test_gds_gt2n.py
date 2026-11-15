@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import klayout.db as pya
 
@@ -41,6 +42,21 @@ class GT2NExportTest(unittest.TestCase):
         text = self.result.read_text()
         self.assertIn(old, text)
         self.result.write_text(text.replace(old, new))
+
+    def use_sram_tracks(self):
+        # The default four-track grid has no legal VG site for W31. Place
+        # diffusion at y=42 and shared gate access at y=72 on the SRAM grid.
+        rows = {0: 84, 48: 144, 144: 204}
+        lines = []
+        for line in self.result.read_text().splitlines():
+            if "=>" in line:
+                fields = line.split()
+                fields[1] = str(rows[float(fields[1])])
+                fields[6] = str(rows[float(fields[6])])
+                line = " ".join(fields)
+            lines.append(line)
+        lines.append("LAYOUT_PROFILE gt2n_sram")
+        self.result.write_text("\n".join(lines) + "\n")
 
     def test_native_layers_dimensions_and_power(self):
         layout, cell = self.export()
@@ -89,6 +105,7 @@ class GT2NExportTest(unittest.TestCase):
             )
 
     def test_width_and_vt_flavors(self):
+        self.use_sram_tracks()
         for width in (13, 31):
             for vt, marker in (
                 ("lvt", None),
@@ -164,11 +181,45 @@ class GT2NExportTest(unittest.TestCase):
         self.assertEqual(layout.dbu, 0.00025)
         self.assertEqual(region(layout, layout.cell("INV_X1"), 2).area(), before)
         self.assertEqual(region(layout, cell, 235, 250).bbox(), pya.Box(0, 0, 336, 576))
+        self.use_sram_tracks()
         layout, cell = self.export(nanosheet_width=31)
         self.assertEqual(len(list(layout.each_cell())), 3)
         instance = next(layout.cell("PARENT").each_inst())
         self.assertEqual(instance.cell_index, cell.cell_index())
         self.assertEqual(region(layout, cell, 2).area(), 2 * 336 * 124)
+
+    def test_illegal_w31_gate_access_preserves_existing_library(self):
+        self.export()
+        original = self.gds.read_bytes()
+        with self.assertRaisesRegex(ValueError, "VG must clear ACT by at least 6 nm"):
+            self.export(nanosheet_width=31)
+        self.assertEqual(self.gds.read_bytes(), original)
+
+    def test_gate_contact_geometry_boundaries(self):
+        self.export()
+        original = self.gds.read_bytes()
+        draw_devices = GT2NLayout._draw_devices
+        # The W13 fixture already has exactly 6 nm between VG and ACT.
+        # Add a half-nm ACT extension, forbidden geometry touching the contact,
+        # or remove its enclosing gate to exercise the exported physical shapes.
+        for layer, bounds, error in (
+            ("ACT", (0, 48, 84, 48.5), "clear ACT"),
+            ("GCUT", (35, 66, 49, 67), "touch or overlap GCUT or DUMMY"),
+            ("DUMMY", (35, 66, 49, 67), "touch or overlap GCUT or DUMMY"),
+            ("GATE", None, "inside GATE"),
+        ):
+            with self.subTest(layer=layer):
+                def changed_frame(exporter):
+                    draw_devices(exporter)
+                    if bounds is None:
+                        exporter.cell.shapes(exporter.layout.layer(3, 0)).clear()
+                    else:
+                        exporter._box(layer, *bounds)
+
+                with patch.object(GT2NLayout, "_draw_devices", changed_frame):
+                    with self.assertRaisesRegex(ValueError, error):
+                        self.export()
+                self.assertEqual(self.gds.read_bytes(), original)
 
     def test_invalid_results_do_not_modify_library(self):
         self.export()

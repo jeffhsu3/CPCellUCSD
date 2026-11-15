@@ -13,6 +13,7 @@ from pathlib import Path
 import klayout.db as pya
 
 from cpcell.gds.result import parse_result, parse_boundary_ports
+from cpcell.tech.gt2n_logic import TRACKS_NM as LOGIC_TRACKS_NM
 
 
 LAYERS = {
@@ -80,7 +81,7 @@ class GT2NLayout:
         self.ROUTE_Y_OFFSET = 0.0 if self.sram_profile else 36.0
         self.route_rows = (14, 42, 72, 102) if self.sram_profile else (36, 60, 84, 108)
         if self.tech_data.layout_profile == "gt2n_logic":
-            self.route_rows = (16, 42, 72, 102, 128)
+            self.route_rows = LOGIC_TRACKS_NM
         self.m1_end_extension = 10 if self.sram_profile else 14
         self.width = self.tech_data.col * self.tech_data.cp_pitch
         self.height = 144.0
@@ -274,6 +275,7 @@ class GT2NLayout:
         self.route_regions = {}
         self._draw_routes()
         self._draw_boundary_ports()
+        self._validate_gate_contacts()
         for layer in ("M0", "M1", "M2"):
             nets = [
                 (net, region.merged())
@@ -292,6 +294,32 @@ class GT2NLayout:
             region = pya.Region(shapes).merged()
             shapes.clear()
             shapes.insert(region)
+
+    def _validate_gate_contacts(self):
+        """Check actual gate access geometry before committing the library.
+
+        Abstract PC access does not encode sheet width or gate-cut clearance.
+        These checks also cover old results produced without a GT2N profile.
+        """
+        def region(layer):
+            return pya.Region(
+                self.cell.shapes(self.layout.layer(LAYERS[layer], 0))
+            ).merged()
+
+        vg = region("VG")
+        if not (vg - region("GATE")).is_empty():
+            raise ValueError("GT2N VG must lie completely inside GATE")
+        if not vg.interacting(region("GCUT") + region("DUMMY")).is_empty():
+            raise ValueError("GT2N VG must not touch or overlap GCUT or DUMMY")
+        # Half-nm database units: 12 units = 6 nm. Positive-area intersection
+        # after vertical growth rejects gaps below 6 nm but accepts equality.
+        # Test overlap/touch separately as external spacing alone misses it.
+        act = region("ACT")
+        if not vg.interacting(act).is_empty() or not (vg.sized(0, 12, 2) & act).is_empty():
+            raise ValueError(
+                "GT2N VG must clear ACT by at least 6 nm; "
+                "solve with a GT2N profile and legal gate-contact tracks"
+            )
 
     def _draw_devices(self):
         active_bottom, active_top = (35, 48) if self.nanosheet_width == 13 else (26, 57)

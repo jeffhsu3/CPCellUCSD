@@ -93,12 +93,13 @@ only for export. The included `.layer` file supplies the GT2N routing pitches
 and widths. Existing PROBE3 results must be regenerated on that grid; the
 exporter rejects incompatible dimensions instead of rescaling them.
 
-For an existing result, the equivalent Python entry point is:
+For a result generated on the supported logic profile, the Python entry point is:
 
 ```bash
+python examples/gt2n_logic/reproduce.py --widths 13 31
 python -m cpcell.gds.gds_GT2N_SH \
-  --result_file output/GT2N_FinFET_2F_4T_4242OF0/SH/result/INV_X1.res \
-  --subckt_name INV_X1 \
+  --result_file build/gt2n_nand4/result/NAND4.res \
+  --subckt_name NAND4_SVT \
   --gds_file output/GT2N_FinFET_2F_4T_4242OF0/SH/gds/gt2n_w31_svt.gds \
   --nanosheet_width 31 --vt svt
 ```
@@ -116,14 +117,22 @@ GT2N exports skip `relocatePin.py`, which uses PROBE3 layer numbers. The
 existing LEF and evaluation scripts also target PROBE3 and are not a GT2N
 signoff flow.
 
-This is an **experimental export backend**, not a GT2N-aware constraint model.
-It retains CPCell's four signal-track centers at 36, 60, 84, and 108 nm and
-maps abstract transistor fingers to the selected physical nanosheet width.
-The solver's FinFET device sizing and DRC constraints have not been replaced.
-In particular, GT2N gate-contact clearance, SDCON spacing, route-end spacing,
-and cell-abutment rules need PDK DRC/LVS validation; W31 gate contacts on the
-inner tracks can violate ACT clearance. Basic input validation and checks
-for shorts between exported metal nets do not establish DRC/LVS cleanliness.
+The default export profile retains CPCell's four signal-track centers at
+36, 60, 84, and 108 nm and maps abstract transistor fingers to the selected
+physical nanosheet width. The exporter rejects VG contacts outside GATE,
+touching GCUT/DUMMY, or less than 6 nm from ACT before writing a library.
+The default grid has no legal W31 gate-contact row; use the supported
+`gt2n_logic` or `gt2n_sram` profiles for W31 generation. Default-grid W13
+gate contacts must use the inner rows at 60/84 nm.
+
+The `gt2n_logic` profile enforces a shared physical contract for its grid,
+contact access, complementary-gate alignment, and metal spacing minima.
+Generate its configuration with `generate_config(..., layout_profile="gt2n_logic")`;
+see [the constraint reference](docs/constraints.md). Separate fixed-frame
+adapters support thin SRAM, split-gate decaps and sense amplifiers. These are
+partial GT2N constraint models: general device sizing and complete PDK rule
+coverage remain unsupported. Physical checks in the exporters do not replace
+PDK DRC/LVS or cell-abutment validation.
 
 Layer assignments and device dimensions are based on the
 [GT2N PDK](https://github.com/azadnaeemi/GT2N), specifically

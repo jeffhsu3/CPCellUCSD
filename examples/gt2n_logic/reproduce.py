@@ -19,29 +19,15 @@ from cpcell.utility.config import generate_config
 
 
 def configure(output, timeout):
-    generate_config(4, "FinFET", "SH", ["NAND4"], output)
+    generate_config(4, "FinFET", "SH", ["NAND4"], output, layout_profile="gt2n_logic")
     path = output / "config/NAND4.json"
     config = json.loads(path.read_text())
     values = {
-        "layout_profile": "gt2n_logic",
-        "routing_layers": ["M0", "M1", "M2"],
-        "minimum_gate_cut_length": 1,
-        "supervia": ["M0"],
-        "MPO": 1,
         "num_search_workers": 4,
-        "enforce_diffusion_alignment": False,
-        "routing_tolerance": False,
-        "m0_pin_extension": False,
         "insert_num_db": 1,
-        "contact_rows": {"gate": [2], "diffusion": [0, 1, 3, 4]},
     }
     for key, value in values.items():
         config[key]["value"] = value
-    config["placement_constraints"]["value"] = [
-        {"type": "align", "transistors": [f"MN{i}S0", f"MP{i}S0"]} for i in range(4)
-    ]
-    config["mar_c2c_rule"]["value"]["M1"] = 60
-    config["eol_c2c_rule"]["value"].update({"M0": 82, "M1": 96, "M2": 82})
     config["max_time"] = {"value": True, "time": timeout}
     path.write_text(json.dumps(config, indent=2) + "\n")
     return path
